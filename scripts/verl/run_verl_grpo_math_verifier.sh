@@ -50,11 +50,18 @@ N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-1}"
 
 WANDB_PROJECT="${WANDB_PROJECT:-math_rl_verl}"
 WANDB_RUN_NAME="${WANDB_RUN_NAME:-grpo-math-verifier-quick}"
+RUN_LOG_DIR="${RUN_LOG_DIR:-$PROJECT_ROOT/logs}"
+RUN_LOG_PATH="${RUN_LOG_PATH:-$RUN_LOG_DIR/${WANDB_RUN_NAME}.log}"
+VERIFIER_DEBUG_LOG="${VERIFIER_DEBUG_LOG:-$RUN_LOG_DIR/${WANDB_RUN_NAME}.reward.log}"
+VERIFIER_DEBUG="${VERIFIER_DEBUG:-1}"
 
 ROLLOUT_MAX_MODEL_LEN="$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))"
 CUSTOM_REWARD_PATH="$PROJECT_ROOT/scripts/verl/verl_verifier_reward.py"
 
+mkdir -p "$RUN_LOG_DIR"
+
 export PYTHONPATH="$VERL_ROOT:${PYTHONPATH:-}"
+export PYTHONUNBUFFERED=1
 export VERIFIER_MODEL_PATH
 export VERIFIER_DEVICE
 export VERIFIER_BETA
@@ -62,6 +69,8 @@ export VERIFIER_DELTA
 export VERIFIER_THRESHOLD
 export VERIFIER_BATCH_SIZE
 export VERIFIER_MAX_LENGTH
+export VERIFIER_DEBUG
+export VERIFIER_DEBUG_LOG
 
 # Ray reward loop workers do not receive GPU visibility by default.
 # When verifier reward should run on GPU, explicitly expose GPU 0 to the
@@ -78,6 +87,8 @@ echo "MODEL_PATH=$MODEL_PATH"
 echo "VERIFIER_MODEL_PATH=$VERIFIER_MODEL_PATH"
 echo "TRAIN_FILE=$TRAIN_FILE"
 echo "VAL_FILE=$VAL_FILE"
+echo "RUN_LOG_PATH=$RUN_LOG_PATH"
+echo "VERIFIER_DEBUG_LOG=$VERIFIER_DEBUG_LOG"
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
@@ -138,4 +149,4 @@ python3 -m verl.trainer.main_ppo \
     trainer.test_freq="$TEST_FREQ" \
     trainer.val_before_train="$VAL_BEFORE_TRAIN" \
     trainer.total_epochs="$TOTAL_EPOCHS" \
-    "$@"
+    "$@" 2>&1 | tee -a "$RUN_LOG_PATH"

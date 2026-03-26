@@ -12,6 +12,8 @@ provides useful auxiliary signal.
 
 import os
 import sys
+import time
+import traceback
 from typing import Any, Dict, List, Optional
 
 from transformers import AutoTokenizer
@@ -35,6 +37,29 @@ _CACHED_VERIFIER: Dict[str, Any] = {
     "model": None,
     "tokenizer": None,
 }
+
+_DEBUG_CALL_COUNT = 0
+
+
+def _debug_enabled() -> bool:
+    value = os.environ.get("VERIFIER_DEBUG", "0").strip().lower()
+    return value not in {"", "0", "false", "no", "off"}
+
+
+def _debug_log(message: str) -> None:
+    if not _debug_enabled():
+        return
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    pid = os.getpid()
+    line = f"[verl_verifier_reward {ts} pid={pid}] {message}"
+    print(line, file=sys.stderr, flush=True)
+    debug_path = os.environ.get("VERIFIER_DEBUG_LOG")
+    if debug_path:
+        try:
+            with open(debug_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except Exception:
+            pass
 
 
 def _env_str(name: str, default: Optional[str] = None) -> Optional[str]:
@@ -88,8 +113,13 @@ def _get_problem(extra_info: Optional[dict]) -> Optional[str]:
 def _load_verifier(verifier_model_path: str, verifier_device: str):
     cache_key = f"{verifier_model_path}::{verifier_device}"
     if _CACHED_VERIFIER["key"] == cache_key:
+        _debug_log(f"reusing cached verifier for key={cache_key}")
         return _CACHED_VERIFIER["model"], _CACHED_VERIFIER["tokenizer"]
 
+    t0 = time.time()
+    _debug_log(
+        f"loading verifier start path={verifier_model_path} device={verifier_device}"
+    )
     tokenizer = AutoTokenizer.from_pretrained(verifier_model_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -99,6 +129,9 @@ def _load_verifier(verifier_model_path: str, verifier_device: str):
     _CACHED_VERIFIER["key"] = cache_key
     _CACHED_VERIFIER["model"] = model
     _CACHED_VERIFIER["tokenizer"] = tokenizer
+    _debug_log(
+        f"loading verifier done path={verifier_model_path} device={verifier_device} elapsed={time.time() - t0:.2f}s"
+    )
     return model, tokenizer
 
 
@@ -113,8 +146,13 @@ def _verifier_shaping(
     delta: float = 0.05,
     correct_threshold: float = 0.5,
 ) -> Dict[str, Any]:
+    t0 = time.time()
     steps = split_into_steps(solution_str)
+    _debug_log(
+        f"verifier_shaping start steps={len(steps)} device={verifier_device} max_length={verifier_max_length} batch_size={verifier_batch_size}"
+    )
     if not steps:
+        _debug_log("verifier_shaping early-exit: no steps parsed")
         return {
             "shaping_score": 0.0,
             "r_avg_step": 0.0,
@@ -124,6 +162,8 @@ def _verifier_shaping(
         }
 
     model, tokenizer = _load_verifier(verifier_model_path, verifier_device)
+    score_t0 = time.time()
+    _debug_log(f"score_steps start n_steps={len(steps)}")
     step_scores = score_steps(
         problem=problem,
         steps=steps,
@@ -132,6 +172,9 @@ def _verifier_shaping(
         device=verifier_device,
         max_length=verifier_max_length,
         batch_size=verifier_batch_size,
+    )
+    _debug_log(
+        f"score_steps done n_steps={len(steps)} elapsed={time.time() - score_t0:.2f}s"
     )
 
     r_avg_step = sum(step_scores) / len(step_scores)
@@ -145,6 +188,12 @@ def _verifier_shaping(
             break
 
     shaping_score = beta * r_avg_step - delta * r_first_error
+    _debug_log(
+        "verifier_shaping done "
+        f"n_steps={len(step_scores)} first_bad_idx={first_bad_idx} "
+        f"r_avg_step={r_avg_step:.4f} r_first_error={r_first_error:.4f} "
+        f"elapsed={time.time() - t0:.2f}s"
+    )
     return {
         "shaping_score": float(shaping_score),
         "r_avg_step": float(r_avg_step),
@@ -167,6 +216,9 @@ def compute_score(
     delta: Optional[float] = None,
     correct_threshold: Optional[float] = None,
 ) -> Dict[str, Any]:
+    global _DEBUG_CALL_COUNT
+    _DEBUG_CALL_COUNT += 1
+    t0 = time.time()
     verifier_cfg = _resolve_verifier_config(
         verifier_model_path=verifier_model_path,
         verifier_device=verifier_device,
@@ -180,8 +232,14 @@ def compute_score(
     base_score = float(math_rule_score(solution_str, ground_truth))
     predicted_answer = extract_boxed_answer(solution_str)
     problem = _get_problem(extra_info)
+    _debug_log(
+        f"compute_score start call={_DEBUG_CALL_COUNT} data_source={data_source} problem_present={bool(problem)} solution_chars={len(solution_str)}"
+    )
 
     if not verifier_cfg["verifier_model_path"] or not problem:
+        _debug_log(
+            f"compute_score fallback call={_DEBUG_CALL_COUNT} verifier_path_present={bool(verifier_cfg['verifier_model_path'])} problem_present={bool(problem)}"
+        )
         return {
             "score": base_score,
             "base_score": base_score,
@@ -194,19 +252,25 @@ def compute_score(
             "predicted_answer": predicted_answer,
         }
 
-    shaping = _verifier_shaping(
-        problem=problem,
-        solution_str=solution_str,
-        verifier_model_path=verifier_cfg["verifier_model_path"],
-        verifier_device=verifier_cfg["verifier_device"],
-        verifier_max_length=verifier_cfg["verifier_max_length"],
-        verifier_batch_size=verifier_cfg["verifier_batch_size"],
-        beta=verifier_cfg["beta"],
-        delta=verifier_cfg["delta"],
-        correct_threshold=verifier_cfg["correct_threshold"],
-    )
+    try:
+        shaping = _verifier_shaping(
+            problem=problem,
+            solution_str=solution_str,
+            verifier_model_path=verifier_cfg["verifier_model_path"],
+            verifier_device=verifier_cfg["verifier_device"],
+            verifier_max_length=verifier_cfg["verifier_max_length"],
+            verifier_batch_size=verifier_cfg["verifier_batch_size"],
+            beta=verifier_cfg["beta"],
+            delta=verifier_cfg["delta"],
+            correct_threshold=verifier_cfg["correct_threshold"],
+        )
+    except Exception as e:
+        _debug_log(
+            f"compute_score exception call={_DEBUG_CALL_COUNT} type={type(e).__name__} msg={e}\n{traceback.format_exc()}"
+        )
+        raise
 
-    return {
+    result = {
         "score": float(base_score + shaping["shaping_score"]),
         "base_score": base_score,
         "shaping_score": shaping["shaping_score"],
@@ -217,6 +281,10 @@ def compute_score(
         "verifier_used": 1.0,
         "predicted_answer": predicted_answer,
     }
+    _debug_log(
+        f"compute_score done call={_DEBUG_CALL_COUNT} score={result['score']:.4f} base={base_score:.4f} shaping={shaping['shaping_score']:.4f} elapsed={time.time() - t0:.2f}s"
+    )
+    return result
 
 
 def compute_score_batched(
