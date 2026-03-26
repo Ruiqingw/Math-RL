@@ -58,14 +58,22 @@ class PRMClassifier(nn.Module):
         elif device in {"auto", "balanced", "balanced_low_0", "sequential"}:
             hf_device_map = device
         else:
-            hf_device_map = {"": device}
+            # CPU: don't use device_map to avoid accelerate's meta tensor issue
+            hf_device_map = None
 
-        base_model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            trust_remote_code=True,
-            torch_dtype=torch.bfloat16,
-            device_map=hf_device_map,
-        )
+        if hf_device_map is None:
+            base_model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                trust_remote_code=True,
+                torch_dtype=torch.bfloat16,
+            )
+        else:
+            base_model = AutoModelForCausalLM.from_pretrained(
+                model_path,
+                trust_remote_code=True,
+                torch_dtype=torch.bfloat16,
+                device_map=hf_device_map,
+            )
         hidden_size = base_model.config.hidden_size
         model = cls(base_model, hidden_size)
 
