@@ -63,6 +63,13 @@ export VERIFIER_THRESHOLD
 export VERIFIER_BATCH_SIZE
 export VERIFIER_MAX_LENGTH
 
+# Ray reward loop workers do not receive GPU visibility by default.
+# When verifier reward should run on GPU, explicitly expose GPU 0 to the
+# reward worker unless the caller overrides it.
+if [[ "$VERIFIER_DEVICE" == cuda* ]]; then
+  export VERL_REWARD_LOOP_CUDA_VISIBLE_DEVICES="${VERL_REWARD_LOOP_CUDA_VISIBLE_DEVICES:-0}"
+fi
+
 cd "$VERL_ROOT"
 
 echo "Launching verifier-shaped GRPO with small validation set..."
