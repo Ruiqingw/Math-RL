@@ -113,4 +113,5 @@ python3 -m verl.trainer.main_ppo \
     trainer.test_freq="$TEST_FREQ" \
     trainer.val_before_train="$VAL_BEFORE_TRAIN" \
     trainer.total_epochs="$TOTAL_EPOCHS" \
+    actor_rollout_ref.rollout.enable_sleep_mode=False \
     "$@"
