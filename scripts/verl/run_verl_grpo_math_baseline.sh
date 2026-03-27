@@ -25,7 +25,7 @@ REF_LOGPROB_MICRO_BATCH_SIZE_PER_GPU="${REF_LOGPROB_MICRO_BATCH_SIZE_PER_GPU:-12
 
 ROLLOUT_N="${ROLLOUT_N:-4}"
 ROLLOUT_MAX_NUM_SEQS="${ROLLOUT_MAX_NUM_SEQS:-256}"
-GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.15}"
+GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.4}"
 
 LR="${LR:-3e-5}"
 KL_LOSS_COEF="${KL_LOSS_COEF:-0.001}"
@@ -96,7 +96,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.max_num_batched_tokens="$ROLLOUT_MAX_MODEL_LEN" \
     actor_rollout_ref.rollout.enable_chunked_prefill=False \
     actor_rollout_ref.rollout.load_format=safetensors \
-    actor_rollout_ref.rollout.layered_summon=True \
+    actor_rollout_ref.rollout.layered_summon=False \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu="$ROLLOUT_LOGPROB_MICRO_BATCH_SIZE_PER_GPU" \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu="$REF_LOGPROB_MICRO_BATCH_SIZE_PER_GPU" \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
