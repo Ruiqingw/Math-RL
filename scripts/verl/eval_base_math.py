@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dtype", default="bfloat16", choices=["bfloat16", "float16", "float32"], help="Model dtype.")
     parser.add_argument("--max-samples", type=int, default=None, help="How many samples to evaluate. Default: full split.")
     parser.add_argument("--max-new-tokens", type=int, default=1024, help="Generation max_new_tokens.")
-    parser.add_argument("--temperature", type=float, default=0.0, help="Sampling temperature. 0 means greedy.")
+    parser.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature. 0 means greedy.")
     parser.add_argument("--top-p", type=float, default=1.0, help="top-p for sampling when temperature > 0.")
     parser.add_argument("--batch-size", type=int, default=32, help="Batch size for vLLM generation.")
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.5, help="vLLM GPU memory utilization.")
