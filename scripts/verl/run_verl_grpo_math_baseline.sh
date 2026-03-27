@@ -32,7 +32,7 @@ KL_LOSS_COEF="${KL_LOSS_COEF:-0.001}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 SAVE_FREQ="${SAVE_FREQ:-20}"
 TEST_FREQ="${TEST_FREQ:-10}"
-VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-True}"
+VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-False}"
 LOG_VAL_GENERATIONS="${LOG_VAL_GENERATIONS:-8}"
 
 LORA_RANK="${LORA_RANK:-32}"
@@ -97,6 +97,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.enable_chunked_prefill=False \
     actor_rollout_ref.rollout.load_format=safetensors \
     actor_rollout_ref.rollout.layered_summon=False \
+    actor_rollout_ref.rollout.free_cache_engine=False \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu="$ROLLOUT_LOGPROB_MICRO_BATCH_SIZE_PER_GPU" \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu="$REF_LOGPROB_MICRO_BATCH_SIZE_PER_GPU" \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
