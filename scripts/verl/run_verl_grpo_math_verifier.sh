@@ -155,7 +155,6 @@ python3 -m verl.trainer.main_ppo \
     trainer.log_val_generations="$LOG_VAL_GENERATIONS" \
     trainer.n_gpus_per_node="$N_GPUS_PER_NODE" \
     trainer.nnodes="$NNODES" \
-    ray_kwargs.ray_init.num_cpus="$RAY_NUM_CPUS" \
     trainer.save_freq="$SAVE_FREQ" \
     trainer.test_freq="$TEST_FREQ" \
     trainer.val_before_train="$VAL_BEFORE_TRAIN" \
