@@ -90,7 +90,14 @@ class PRMClassifier(nn.Module):
             score_device = next(base_model.parameters()).device
         else:
             score_device = torch.device(device)
-        model.score = model.score.to(device=score_device, dtype=torch.bfloat16)
+        try:
+            model.score = model.score.to(device=score_device, dtype=torch.bfloat16)
+        except NotImplementedError:
+            # Some PyTorch/HF versions leave score as meta tensor via _fast_init.
+            # Use to_empty() to allocate real storage, then reload the weights.
+            model.score = model.score.to_empty(device=score_device).to(dtype=torch.bfloat16)
+            head_state_r = torch.load(head_path, map_location=str(score_device))
+            model.score.load_state_dict(head_state_r)
         model.eval()
         return model
 
