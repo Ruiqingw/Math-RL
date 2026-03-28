@@ -15,7 +15,7 @@ VERL_ROOT="${VERL_ROOT:-$PROJECT_ROOT/verl}"
 
 MODEL_PATH="${MODEL_PATH:-/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B}"
 VERIFIER_MODEL_PATH="${VERIFIER_MODEL_PATH:-/root/autodl-tmp/prm_grpo/verifier_cls/final}"
-VERIFIER_DEVICE="${VERIFIER_DEVICE:-cuda}"
+VERIFIER_DEVICE="${VERIFIER_DEVICE:-cpu}"
 
 DATA_DIR="${DATA_DIR:-/root/autodl-tmp/prm_grpo/data/verl_math}"
 TRAIN_FILE="${TRAIN_FILE:-$DATA_DIR/train.parquet}"
