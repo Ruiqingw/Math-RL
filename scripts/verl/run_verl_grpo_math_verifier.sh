@@ -3,6 +3,9 @@ set -euo pipefail
 
 # Fix Ray + protobuf C++ extension incompatibility (is_repeated attribute error)
 export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python
+export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
+export RAY_USE_MULTIPROCESSING_CPU_COUNT="${RAY_USE_MULTIPROCESSING_CPU_COUNT:-1}"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 VERL_ROOT="${VERL_ROOT:-$PROJECT_ROOT/verl}"
@@ -35,7 +38,7 @@ KL_LOSS_COEF="${KL_LOSS_COEF:-0.001}"
 TOTAL_EPOCHS="${TOTAL_EPOCHS:-1}"
 SAVE_FREQ="${SAVE_FREQ:-20}"
 TEST_FREQ="${TEST_FREQ:-2}"
-VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-True}"
+VAL_BEFORE_TRAIN="${VAL_BEFORE_TRAIN:-False}"
 LOG_VAL_GENERATIONS="${LOG_VAL_GENERATIONS:-8}"
 
 LORA_RANK="${LORA_RANK:-32}"
@@ -50,6 +53,7 @@ REWARD_NUM_WORKERS="${REWARD_NUM_WORKERS:-1}"
 
 NNODES="${NNODES:-1}"
 N_GPUS_PER_NODE="${N_GPUS_PER_NODE:-1}"
+RAY_NUM_CPUS="${RAY_NUM_CPUS:-10}"
 
 WANDB_PROJECT="${WANDB_PROJECT:-math_rl_verl}"
 WANDB_RUN_NAME="${WANDB_RUN_NAME:-grpo-math-verifier-quick}"
@@ -148,6 +152,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.log_val_generations="$LOG_VAL_GENERATIONS" \
     trainer.n_gpus_per_node="$N_GPUS_PER_NODE" \
     trainer.nnodes="$NNODES" \
+    ray_kwargs.ray_init.num_cpus="$RAY_NUM_CPUS" \
     trainer.save_freq="$SAVE_FREQ" \
     trainer.test_freq="$TEST_FREQ" \
     trainer.val_before_train="$VAL_BEFORE_TRAIN" \
