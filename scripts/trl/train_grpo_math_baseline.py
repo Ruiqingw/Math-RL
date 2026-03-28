@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-prompt-length", type=int, default=512)
     parser.add_argument("--max-completion-length", type=int, default=1536)
     parser.add_argument("--per-device-train-batch-size", type=int, default=2)
-    parser.add_argument("--per-device-eval-batch-size", type=int, default=2)
+    parser.add_argument("--per-device-eval-batch-size", type=int, default=4)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
     parser.add_argument("--num-generations", type=int, default=4)
     parser.add_argument("--learning-rate", type=float, default=3e-5)
