@@ -14,3 +14,5 @@ scripts_upload.tar.gz
 
 # Local clone of external dependency; keep project-specific GRPO scripts under scripts/verl/
 /verl/
+logs/
+wandb/

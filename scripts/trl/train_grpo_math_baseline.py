@@ -92,7 +92,6 @@ def main() -> None:
         per_device_eval_batch_size=args.per_device_eval_batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         num_generations=args.num_generations,
-        max_prompt_length=args.max_prompt_length,
         max_completion_length=args.max_completion_length,
         bf16=args.bf16,
         gradient_checkpointing=True,
