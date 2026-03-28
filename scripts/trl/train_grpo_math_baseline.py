@@ -14,6 +14,7 @@ from scripts.trl.rewards import math_boxed_reward
 
 DEFAULT_MODEL_PATH = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B"
 DEFAULT_DATA_DIR = "/root/autodl-tmp/prm_grpo/data/trl_math"
+DEFAULT_WANDB_PROJECT = "math_rl_trl"
 
 
 def parse_args() -> argparse.Namespace:
@@ -40,6 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--bf16", action="store_true", default=True)
     parser.add_argument("--no-bf16", dest="bf16", action="store_false")
+    parser.add_argument("--wandb-project", default=DEFAULT_WANDB_PROJECT)
     parser.add_argument("--use-vllm", action="store_true")
     parser.add_argument("--vllm-mode", default="colocate", choices=["colocate", "server"])
     parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.3)
@@ -53,6 +55,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    os.environ.setdefault("WANDB_PROJECT", args.wandb_project)
 
     train_path = os.path.join(args.data_dir, "train.parquet")
     test_path = os.path.join(args.data_dir, "test.parquet")
