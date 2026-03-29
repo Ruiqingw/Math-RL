@@ -70,6 +70,37 @@ class WandbVerifierEvalCallback(TrainerCallback):
         self.num_samples = num_samples
         self.max_new_tokens = max_new_tokens
 
+    @staticmethod
+    def _force_log(metrics: dict, step: int) -> None:
+        try:
+            import wandb
+        except Exception:
+            return
+
+        if wandb.run is None:
+            return
+
+        wandb.log(metrics, step=step)
+        for key, value in metrics.items():
+            if isinstance(value, (int, float)):
+                wandb.run.summary[key] = value
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        logs = logs or {}
+        composite_metric = None
+        for key in ("eval_rewards/math_verifier_reward/mean", "eval_reward", "eval/reward"):
+            if key in logs:
+                composite_metric = logs[key]
+                break
+        if composite_metric is not None:
+            self._force_log(
+                {
+                    "eval/composite_reward": composite_metric,
+                    "eval_composite_reward": composite_metric,
+                },
+                step=state.global_step,
+            )
+
     def on_evaluate(self, args, state, control, model=None, **kwargs):
         try:
             import wandb
@@ -109,8 +140,10 @@ class WandbVerifierEvalCallback(TrainerCallback):
             if idx < num_table_rows:
                 table.add_data(prompt, generated_text, gold_answer, accuracy)
 
+        accuracy = total_correct / max(total_seen, 1)
         metrics = {
-            "eval/accuracy": total_correct / max(total_seen, 1),
+            "eval/accuracy": accuracy,
+            "eval_accuracy": accuracy,
             "completions": table,
         }
         composite_metric = None
@@ -121,7 +154,8 @@ class WandbVerifierEvalCallback(TrainerCallback):
                 break
         if composite_metric is not None:
             metrics["eval/composite_reward"] = composite_metric
-        wandb.log(metrics, step=state.global_step)
+            metrics["eval_composite_reward"] = composite_metric
+        self._force_log(metrics, step=state.global_step)
 
 
 def main() -> None:
