@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """
-Evaluate a base causal LM on MATH-lighteval using plain-text prompts.
-
-This is intentionally separate from the verl GRPO pipeline:
-  - no chat template
-  - no RL loop
-  - direct generation from a base model
-  - score with verl's math_reward
+Evaluate a base causal LM on MATH-lighteval using the same plain-text prompt
+style as the TRL GRPO pipeline.
 """
 
 import argparse
@@ -47,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.5, help="vLLM GPU memory utilization.")
     parser.add_argument(
         "--instruction",
-        default="Solve the following math problem step by step. Put the final answer inside \\boxed{}.",
+        default="Let's think step by step and output the final answer within \\boxed{}.",
         help="Instruction suffix appended to each problem.",
     )
     parser.add_argument("--output-jsonl", default=DEFAULT_OUTPUT_JSONL, help="Optional path to save per-sample outputs.")
@@ -67,7 +62,7 @@ def extract_solution(solution_str: str) -> str:
 
 
 def build_prompt(problem: str, instruction: str) -> str:
-    return f"Problem:\n{problem}\n\n{instruction}\n\nSolution:\n"
+    return f"{problem} {instruction}".strip()
 
 
 def load_model_and_tokenizer(model_path: str, device: str, dtype: torch.dtype):
