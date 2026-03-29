@@ -4,13 +4,12 @@ from __future__ import annotations
 import argparse
 import os
 
-import torch
 from datasets import load_dataset
 from peft import LoraConfig
 from transformers import AutoTokenizer
 from trl import GRPOConfig, GRPOTrainer
 
-from scripts.trl.rewards import MathVerifierReward, math_boxed_reward
+from scripts.trl.rewards import VerifierShapingReward, math_boxed_reward
 
 
 DEFAULT_MODEL_PATH = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B"
@@ -61,104 +60,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--verifier-delta", type=float, default=0.05)
     parser.add_argument("--verifier-threshold", type=float, default=0.5)
     return parser.parse_args()
-
-
-class ForcedWandbVerifierGRPOTrainer(GRPOTrainer):
-    def __init__(self, *args, log_completions_samples: int = 8, max_new_tokens: int = 1536, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._log_completions_samples = log_completions_samples
-        self._max_new_tokens = max_new_tokens
-
-    @staticmethod
-    def _force_log(metrics: dict, step: int) -> None:
-        try:
-            import wandb
-        except Exception:
-            return
-
-        if wandb.run is None:
-            return
-
-        wandb.log(metrics, step=step)
-        for key, value in metrics.items():
-            if isinstance(value, (int, float)):
-                wandb.run.summary[key] = value
-
-    def log(self, logs, *args, **kwargs):
-        super().log(logs, *args, **kwargs)
-        composite_metric = None
-        for key in ("eval_rewards/math_verifier_reward/mean", "eval_reward", "eval/reward"):
-            if key in logs:
-                composite_metric = logs[key]
-                break
-        if composite_metric is not None:
-            self._force_log(
-                {
-                    "eval/composite_reward": composite_metric,
-                    "eval_composite_reward": composite_metric,
-                },
-                step=self.state.global_step,
-            )
-
-    def evaluate(self, *args, **kwargs):
-        metrics = super().evaluate(*args, **kwargs)
-
-        try:
-            import wandb
-        except Exception:
-            return metrics
-
-        eval_dataset = kwargs.get("eval_dataset", self.eval_dataset)
-        if wandb.run is None or eval_dataset is None or len(eval_dataset) == 0:
-            return metrics
-
-        model = self.model
-        model.eval()
-        model_device = next(model.parameters()).device
-        table = wandb.Table(columns=["prompt", "completion", "gold_answer", "accuracy"])
-        total_correct = 0.0
-        total_seen = 0
-        num_table_rows = min(self._log_completions_samples, len(eval_dataset))
-
-        for idx in range(len(eval_dataset)):
-            sample = eval_dataset[idx]
-            prompt = sample["prompt"]
-            gold_answer = sample["gold_answer"]
-            encoded = self.processing_class(prompt, return_tensors="pt")
-            encoded = {k: v.to(model_device) for k, v in encoded.items()}
-            with torch.no_grad():
-                outputs = model.generate(
-                    **encoded,
-                    max_new_tokens=self._max_new_tokens,
-                    do_sample=False,
-                    pad_token_id=self.processing_class.pad_token_id,
-                    eos_token_id=self.processing_class.eos_token_id,
-                )
-            generated_ids = outputs[0][encoded["input_ids"].shape[1] :]
-            generated_text = self.processing_class.decode(generated_ids, skip_special_tokens=True)
-            accuracy = math_boxed_reward([prompt], [generated_text], [gold_answer])[0]
-            total_correct += accuracy
-            total_seen += 1
-
-            if idx < num_table_rows:
-                table.add_data(prompt, generated_text, gold_answer, accuracy)
-
-        accuracy = total_correct / max(total_seen, 1)
-        payload = {
-            "eval/accuracy": accuracy,
-            "eval_accuracy": accuracy,
-            "completions": table,
-        }
-        composite_metric = None
-        for key in ("eval_rewards/math_verifier_reward/mean", "eval_reward", "eval/reward"):
-            if key in metrics:
-                composite_metric = metrics[key]
-                break
-        if composite_metric is not None:
-            payload["eval/composite_reward"] = composite_metric
-            payload["eval_composite_reward"] = composite_metric
-        self._force_log(payload, step=self.state.global_step)
-        return metrics
 
 
 def main() -> None:
@@ -218,7 +119,7 @@ def main() -> None:
         seed=args.seed,
     )
 
-    reward_func = MathVerifierReward(
+    shaping_reward = VerifierShapingReward(
         verifier_model_path=args.verifier_model_path,
         verifier_device=args.verifier_device,
         verifier_max_length=args.verifier_max_length,
@@ -228,16 +129,18 @@ def main() -> None:
         verifier_threshold=args.verifier_threshold,
     )
 
-    trainer = ForcedWandbVerifierGRPOTrainer(
+    # Two separate reward functions so TRL logs each independently:
+    #   rewards/math_boxed_reward/mean  = accuracy (0/1)
+    #   rewards/verifier_shaping_reward/mean = shaping signal
+    #   reward = sum of both (used for GRPO optimization)
+    trainer = GRPOTrainer(
         model=args.model_path,
-        reward_funcs=reward_func,
+        reward_funcs=[math_boxed_reward, shaping_reward],
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
         processing_class=tokenizer,
         peft_config=peft_config,
-        log_completions_samples=args.log_completions_samples,
-        max_new_tokens=args.max_completion_length,
     )
 
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)

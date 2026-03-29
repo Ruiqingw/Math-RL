@@ -4,10 +4,9 @@ from __future__ import annotations
 import argparse
 import os
 
-import torch
 from datasets import load_dataset
 from peft import LoraConfig
-from transformers import AutoTokenizer, TrainerCallback
+from transformers import AutoTokenizer
 from trl import GRPOConfig, GRPOTrainer
 
 from scripts.trl.rewards import math_boxed_reward
@@ -51,71 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora-r", type=int, default=32)
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.0)
-    parser.add_argument("--log-completions-samples", type=int, default=8)
     return parser.parse_args()
-
-
-class WandbEvalArtifactsCallback(TrainerCallback):
-    def __init__(self, tokenizer, eval_dataset, num_samples: int, max_new_tokens: int):
-        self.tokenizer = tokenizer
-        self.eval_dataset = eval_dataset
-        self.num_samples = num_samples
-        self.max_new_tokens = max_new_tokens
-
-    def _generate_and_score(self, model, global_step: int):
-        """Generate completions on the full eval set and compute accuracy.
-
-        Also logs a wandb Table with the first ``self.num_samples`` rows.
-        Returns the mean accuracy over the entire eval set.
-        """
-        try:
-            import wandb
-        except Exception:
-            return None
-
-        if wandb.run is None or len(self.eval_dataset) == 0:
-            return None
-
-        model.eval()
-        table_rows: int = min(self.num_samples, len(self.eval_dataset))
-        table = wandb.Table(columns=["prompt", "completion", "gold_answer", "reward"])
-
-        total_reward = 0.0
-        n_samples = len(self.eval_dataset)
-
-        for idx in range(n_samples):
-            sample = self.eval_dataset[idx]
-            prompt = sample["prompt"]
-            gold_answer = sample["gold_answer"]
-            encoded = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
-            encoded = {k: v.to(model.device) for k, v in encoded.items()}
-            with torch.no_grad():
-                outputs = model.generate(
-                    **encoded,
-                    max_new_tokens=self.max_new_tokens,
-                    do_sample=False,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
-                )
-            generated_ids = outputs[0][encoded["input_ids"].shape[1] :]
-            generated_text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
-            reward = math_boxed_reward([prompt], [generated_text], [gold_answer])[0]
-            total_reward += reward
-
-            if idx < table_rows:
-                table.add_data(prompt, generated_text, gold_answer, reward)
-
-        accuracy = total_reward / n_samples if n_samples > 0 else 0.0
-        wandb.log(
-            {"completions": table, "eval/accuracy": accuracy},
-            step=global_step,
-        )
-        return accuracy
-
-    def on_evaluate(self, args, state, control, model=None, **kwargs):
-        if model is None:
-            return
-        self._generate_and_score(model, state.global_step)
 
 
 def main() -> None:
@@ -183,14 +118,6 @@ def main() -> None:
         eval_dataset=eval_dataset,
         processing_class=tokenizer,
         peft_config=peft_config,
-        callbacks=[
-            WandbEvalArtifactsCallback(
-                tokenizer=tokenizer,
-                eval_dataset=eval_dataset,
-                num_samples=args.log_completions_samples,
-                max_new_tokens=args.max_completion_length,
-            )
-        ],
     )
 
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)

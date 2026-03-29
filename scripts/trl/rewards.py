@@ -119,6 +119,52 @@ def verifier_shaping_reward(
     return rewards
 
 
+class VerifierShapingReward:
+    """Returns *only* the verifier shaping signal (no base correctness).
+
+    Designed to be used alongside ``math_boxed_reward`` as a second reward
+    function so that TRL logs each component separately:
+      - ``rewards/math_boxed_reward/mean`` = accuracy (0/1)
+      - ``rewards/verifier_shaping_reward/mean`` = shaping signal
+    """
+
+    def __init__(
+        self,
+        verifier_model_path: str,
+        verifier_device: str = "cpu",
+        verifier_max_length: int = 1536,
+        verifier_batch_size: int = 1,
+        verifier_beta: float = 0.1,
+        verifier_delta: float = 0.05,
+        verifier_threshold: float = 0.5,
+    ):
+        self.verifier_model_path = verifier_model_path
+        self.verifier_device = verifier_device
+        self.verifier_max_length = verifier_max_length
+        self.verifier_batch_size = verifier_batch_size
+        self.verifier_beta = verifier_beta
+        self.verifier_delta = verifier_delta
+        self.verifier_threshold = verifier_threshold
+        self.__name__ = "verifier_shaping_reward"
+
+    def __call__(self, prompts, completions, problem, **kwargs):
+        return verifier_shaping_reward(
+            prompts=prompts,
+            completions=completions,
+            problem=problem,
+            verifier_model_path=self.verifier_model_path,
+            verifier_device=self.verifier_device,
+            verifier_max_length=self.verifier_max_length,
+            verifier_batch_size=self.verifier_batch_size,
+            verifier_beta=self.verifier_beta,
+            verifier_delta=self.verifier_delta,
+            verifier_threshold=self.verifier_threshold,
+            **kwargs,
+        )
+
+
+# Keep MathVerifierReward for backward compatibility, but prefer using
+# [math_boxed_reward, VerifierShapingReward(...)] as two separate reward_funcs.
 class MathVerifierReward:
     def __init__(
         self,
