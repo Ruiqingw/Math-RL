@@ -24,7 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default="/root/autodl-tmp/prm_grpo/outputs/trl_grpo_math_baseline")
     parser.add_argument("--run-name", default="trl-grpo-math-baseline")
     parser.add_argument("--train-max-samples", type=int, default=7500)
-    parser.add_argument("--eval-max-samples", type=int, default=5000)
+    parser.add_argument("--eval-max-samples", type=int, default=200)
     parser.add_argument("--max-prompt-length", type=int, default=512)
     parser.add_argument("--max-completion-length", type=int, default=1536)
     parser.add_argument("--per-device-train-batch-size", type=int, default=2)
