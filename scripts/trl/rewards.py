@@ -137,6 +137,7 @@ class MathVerifierReward:
         self.verifier_beta = verifier_beta
         self.verifier_delta = verifier_delta
         self.verifier_threshold = verifier_threshold
+        self.__name__ = "math_verifier_reward"
 
     def __call__(self, prompts, completions, gold_answer, problem, **kwargs):
         base_rewards = math_boxed_reward(

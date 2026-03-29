@@ -115,7 +115,7 @@ class WandbVerifierEvalCallback(TrainerCallback):
         }
         composite_metric = None
         logs = kwargs.get("metrics") or {}
-        for key in ("eval_rewards/MathVerifierReward/mean", "eval_reward", "eval/reward"):
+        for key in ("eval_rewards/math_verifier_reward/mean", "eval_reward", "eval/reward"):
             if key in logs:
                 composite_metric = logs[key]
                 break
