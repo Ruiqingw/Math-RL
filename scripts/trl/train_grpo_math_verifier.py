@@ -10,7 +10,7 @@ from peft import LoraConfig
 from transformers import AutoTokenizer, TrainerCallback
 from trl import GRPOConfig, GRPOTrainer
 
-from scripts.trl.rewards import MathVerifierReward, math_boxed_reward
+from scripts.trl.rewards import build_verifier_shaping_reward, math_boxed_reward
 
 
 DEFAULT_MODEL_PATH = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B"
@@ -87,8 +87,17 @@ class WandbVerifierEvalCallback(TrainerCallback):
 
     def on_log(self, args, state, control, logs=None, **kwargs):
         logs = logs or {}
+        accuracy = logs.get("eval_rewards/math_boxed_reward/mean")
+        if accuracy is not None:
+            self._force_log(
+                {
+                    "eval/accuracy": accuracy,
+                    "eval_accuracy": accuracy,
+                },
+                step=state.global_step,
+            )
         composite_metric = None
-        for key in ("eval_rewards/math_verifier_reward/mean", "eval_reward", "eval/reward"):
+        for key in ("eval_reward", "eval/reward"):
             if key in logs:
                 composite_metric = logs[key]
                 break
@@ -148,7 +157,7 @@ class WandbVerifierEvalCallback(TrainerCallback):
         }
         composite_metric = None
         logs = kwargs.get("metrics") or {}
-        for key in ("eval_rewards/math_verifier_reward/mean", "eval_reward", "eval/reward"):
+        for key in ("eval_reward", "eval/reward"):
             if key in logs:
                 composite_metric = logs[key]
                 break
@@ -215,7 +224,7 @@ def main() -> None:
         seed=args.seed,
     )
 
-    reward_func = MathVerifierReward(
+    verifier_shaping_func = build_verifier_shaping_reward(
         verifier_model_path=args.verifier_model_path,
         verifier_device=args.verifier_device,
         verifier_max_length=args.verifier_max_length,
@@ -227,7 +236,7 @@ def main() -> None:
 
     trainer = GRPOTrainer(
         model=args.model_path,
-        reward_funcs=reward_func,
+        reward_funcs=[math_boxed_reward, verifier_shaping_func],
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,

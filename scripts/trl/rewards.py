@@ -160,3 +160,31 @@ class MathVerifierReward:
             **kwargs,
         )
         return [float(base + shaping) for base, shaping in zip(base_rewards, shaping_rewards)]
+
+
+def build_verifier_shaping_reward(
+    verifier_model_path: str,
+    verifier_device: str = "cpu",
+    verifier_max_length: int = 1536,
+    verifier_batch_size: int = 1,
+    verifier_beta: float = 0.1,
+    verifier_delta: float = 0.05,
+    verifier_threshold: float = 0.5,
+):
+    def _reward(prompts, completions, problem, **kwargs):
+        return verifier_shaping_reward(
+            prompts=prompts,
+            completions=completions,
+            problem=problem,
+            verifier_model_path=verifier_model_path,
+            verifier_device=verifier_device,
+            verifier_max_length=verifier_max_length,
+            verifier_batch_size=verifier_batch_size,
+            verifier_beta=verifier_beta,
+            verifier_delta=verifier_delta,
+            verifier_threshold=verifier_threshold,
+            **kwargs,
+        )
+
+    _reward.__name__ = "verifier_shaping_reward"
+    return _reward
