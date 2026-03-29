@@ -7,7 +7,7 @@ import os
 import torch
 from datasets import load_dataset
 from peft import LoraConfig
-from transformers import AutoTokenizer, TrainerCallback
+from transformers import AutoTokenizer
 from trl import GRPOConfig, GRPOTrainer
 
 from scripts.trl.rewards import MathVerifierReward, math_boxed_reward
@@ -63,12 +63,11 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-class WandbVerifierEvalCallback(TrainerCallback):
-    def __init__(self, tokenizer, eval_dataset, num_samples: int, max_new_tokens: int):
-        self.tokenizer = tokenizer
-        self.eval_dataset = eval_dataset
-        self.num_samples = num_samples
-        self.max_new_tokens = max_new_tokens
+class ForcedWandbVerifierGRPOTrainer(GRPOTrainer):
+    def __init__(self, *args, log_completions_samples: int = 8, max_new_tokens: int = 1536, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._log_completions_samples = log_completions_samples
+        self._max_new_tokens = max_new_tokens
 
     @staticmethod
     def _force_log(metrics: dict, step: int) -> None:
@@ -85,8 +84,8 @@ class WandbVerifierEvalCallback(TrainerCallback):
             if isinstance(value, (int, float)):
                 wandb.run.summary[key] = value
 
-    def on_log(self, args, state, control, logs=None, **kwargs):
-        logs = logs or {}
+    def log(self, logs, *args, **kwargs):
+        super().log(logs, *args, **kwargs)
         composite_metric = None
         for key in ("eval_rewards/math_verifier_reward/mean", "eval_reward", "eval/reward"):
             if key in logs:
@@ -98,41 +97,45 @@ class WandbVerifierEvalCallback(TrainerCallback):
                     "eval/composite_reward": composite_metric,
                     "eval_composite_reward": composite_metric,
                 },
-                step=state.global_step,
+                step=self.state.global_step,
             )
 
-    def on_evaluate(self, args, state, control, model=None, **kwargs):
+    def evaluate(self, *args, **kwargs):
+        metrics = super().evaluate(*args, **kwargs)
+
         try:
             import wandb
         except Exception:
-            return
+            return metrics
 
-        if model is None or wandb.run is None or len(self.eval_dataset) == 0:
-            return
+        eval_dataset = kwargs.get("eval_dataset", self.eval_dataset)
+        if wandb.run is None or eval_dataset is None or len(eval_dataset) == 0:
+            return metrics
 
+        model = self.model
         model.eval()
+        model_device = next(model.parameters()).device
         table = wandb.Table(columns=["prompt", "completion", "gold_answer", "accuracy"])
-
         total_correct = 0.0
         total_seen = 0
-        num_table_rows = min(self.num_samples, len(self.eval_dataset))
+        num_table_rows = min(self._log_completions_samples, len(eval_dataset))
 
-        for idx in range(len(self.eval_dataset)):
-            sample = self.eval_dataset[idx]
+        for idx in range(len(eval_dataset)):
+            sample = eval_dataset[idx]
             prompt = sample["prompt"]
             gold_answer = sample["gold_answer"]
-            encoded = self.tokenizer(prompt, return_tensors="pt")
-            encoded = {k: v.to(model.device) for k, v in encoded.items()}
+            encoded = self.processing_class(prompt, return_tensors="pt")
+            encoded = {k: v.to(model_device) for k, v in encoded.items()}
             with torch.no_grad():
                 outputs = model.generate(
                     **encoded,
-                    max_new_tokens=self.max_new_tokens,
+                    max_new_tokens=self._max_new_tokens,
                     do_sample=False,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
+                    pad_token_id=self.processing_class.pad_token_id,
+                    eos_token_id=self.processing_class.eos_token_id,
                 )
             generated_ids = outputs[0][encoded["input_ids"].shape[1] :]
-            generated_text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+            generated_text = self.processing_class.decode(generated_ids, skip_special_tokens=True)
             accuracy = math_boxed_reward([prompt], [generated_text], [gold_answer])[0]
             total_correct += accuracy
             total_seen += 1
@@ -141,21 +144,21 @@ class WandbVerifierEvalCallback(TrainerCallback):
                 table.add_data(prompt, generated_text, gold_answer, accuracy)
 
         accuracy = total_correct / max(total_seen, 1)
-        metrics = {
+        payload = {
             "eval/accuracy": accuracy,
             "eval_accuracy": accuracy,
             "completions": table,
         }
         composite_metric = None
-        logs = kwargs.get("metrics") or {}
         for key in ("eval_rewards/math_verifier_reward/mean", "eval_reward", "eval/reward"):
-            if key in logs:
-                composite_metric = logs[key]
+            if key in metrics:
+                composite_metric = metrics[key]
                 break
         if composite_metric is not None:
-            metrics["eval/composite_reward"] = composite_metric
-            metrics["eval_composite_reward"] = composite_metric
-        self._force_log(metrics, step=state.global_step)
+            payload["eval/composite_reward"] = composite_metric
+            payload["eval_composite_reward"] = composite_metric
+        self._force_log(payload, step=self.state.global_step)
+        return metrics
 
 
 def main() -> None:
@@ -225,7 +228,7 @@ def main() -> None:
         verifier_threshold=args.verifier_threshold,
     )
 
-    trainer = GRPOTrainer(
+    trainer = ForcedWandbVerifierGRPOTrainer(
         model=args.model_path,
         reward_funcs=reward_func,
         args=training_args,
@@ -233,14 +236,8 @@ def main() -> None:
         eval_dataset=eval_dataset,
         processing_class=tokenizer,
         peft_config=peft_config,
-        callbacks=[
-            WandbVerifierEvalCallback(
-                tokenizer=tokenizer,
-                eval_dataset=eval_dataset,
-                num_samples=args.log_completions_samples,
-                max_new_tokens=args.max_completion_length,
-            )
-        ],
+        log_completions_samples=args.log_completions_samples,
+        max_new_tokens=args.max_completion_length,
     )
 
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
