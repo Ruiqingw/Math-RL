@@ -62,24 +62,32 @@ class WandbEvalArtifactsCallback(TrainerCallback):
         self.num_samples = num_samples
         self.max_new_tokens = max_new_tokens
 
-    def _log_eval_table(self, model, global_step: int):
+    def _generate_and_score(self, model, global_step: int):
+        """Generate completions on the full eval set and compute accuracy.
+
+        Also logs a wandb Table with the first ``self.num_samples`` rows.
+        Returns the mean accuracy over the entire eval set.
+        """
         try:
             import wandb
         except Exception:
-            return
+            return None
 
-        if wandb.run is None or self.num_samples <= 0 or len(self.eval_dataset) == 0:
-            return
+        if wandb.run is None or len(self.eval_dataset) == 0:
+            return None
 
         model.eval()
+        table_rows: int = min(self.num_samples, len(self.eval_dataset))
         table = wandb.Table(columns=["prompt", "completion", "gold_answer", "reward"])
-        num_rows = min(self.num_samples, len(self.eval_dataset))
 
-        for idx in range(num_rows):
+        total_reward = 0.0
+        n_samples = len(self.eval_dataset)
+
+        for idx in range(n_samples):
             sample = self.eval_dataset[idx]
             prompt = sample["prompt"]
             gold_answer = sample["gold_answer"]
-            encoded = self.tokenizer(prompt, return_tensors="pt")
+            encoded = self.tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512)
             encoded = {k: v.to(model.device) for k, v in encoded.items()}
             with torch.no_grad():
                 outputs = model.generate(
@@ -92,26 +100,22 @@ class WandbEvalArtifactsCallback(TrainerCallback):
             generated_ids = outputs[0][encoded["input_ids"].shape[1] :]
             generated_text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
             reward = math_boxed_reward([prompt], [generated_text], [gold_answer])[0]
-            table.add_data(prompt, generated_text, gold_answer, reward)
+            total_reward += reward
 
-        wandb.log({"completions": table}, step=global_step)
+            if idx < table_rows:
+                table.add_data(prompt, generated_text, gold_answer, reward)
 
-    def on_log(self, args, state, control, logs=None, model=None, **kwargs):
-        logs = logs or {}
-        metric = logs.get("eval_rewards/math_boxed_reward/mean")
-        if metric is None:
-            return
-        try:
-            import wandb
-        except Exception:
-            return
-        if wandb.run is not None:
-            wandb.log({"eval/accuracy": metric}, step=state.global_step)
+        accuracy = total_reward / n_samples if n_samples > 0 else 0.0
+        wandb.log(
+            {"completions": table, "eval/accuracy": accuracy},
+            step=global_step,
+        )
+        return accuracy
 
     def on_evaluate(self, args, state, control, model=None, **kwargs):
         if model is None:
             return
-        self._log_eval_table(model, state.global_step)
+        self._generate_and_score(model, state.global_step)
 
 
 def main() -> None:
