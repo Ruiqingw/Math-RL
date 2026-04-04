@@ -69,8 +69,19 @@ DATASET_NAME = "trl-lib/prm800k"
 OUTPUT_DIR   = "/root/autodl-tmp/prm_grpo/verifier_cls"
 MAX_LENGTH   = 1536
 TARGET_NEGATIVE_FRACTION = 0.20
+WANDB_PROJECT = "math_rl_verifier"
 WANDB_DEBUG_TABLE_ROWS = 24
 WANDB_STATS_SAMPLE_SIZE = 256
+
+
+def format_softneg_tag(target_neg_fraction: float) -> str:
+    """Format 0.20 -> softneg20, 0.125 -> softneg12p5."""
+    percentage = target_neg_fraction * 100
+    if abs(percentage - round(percentage)) < 1e-8:
+        suffix = str(int(round(percentage)))
+    else:
+        suffix = f"{percentage:.2f}".rstrip("0").rstrip(".").replace(".", "p")
+    return f"softneg{suffix}"
 
 
 # — Classification Head Wrapper ———————————————————————
@@ -629,6 +640,9 @@ def main():
     # Keep the tail of the verifier prompt, where [Current step] and "Answer:"
     # live, when long problem/context forces truncation.
     tokenizer.truncation_side = "left"
+    os.environ.setdefault("WANDB_PROJECT", WANDB_PROJECT)
+    run_name = f"prm-cls-{format_softneg_tag(TARGET_NEGATIVE_FRACTION)}-qwen25-math-1.5b"
+    logger.info("W&B config: project=%s run_name=%s", os.environ["WANDB_PROJECT"], run_name)
 
     base_model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
@@ -679,7 +693,7 @@ def main():
         dataloader_num_workers = 2,
         remove_unused_columns  = False,
         report_to            = "wandb",
-        run_name             = "prm-cls-softneg40-qwen25-math-1.5b",
+        run_name             = run_name,
         metric_for_best_model  = "eval_balanced_accuracy",
         greater_is_better      = True,
     )
