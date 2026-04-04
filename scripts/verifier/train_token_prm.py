@@ -71,6 +71,7 @@ WANDB_PROJECT = "math_rl_token_prm"
 PER_DEVICE_TRAIN_BATCH_SIZE = 4
 PER_DEVICE_EVAL_BATCH_SIZE = 8
 EVAL_ROW_FRACTION = 0.5
+NEG_LOSS_WEIGHT = 3.0
 
 
 def training_mode_tag(freeze_base_model: bool) -> str:
@@ -80,13 +81,35 @@ def training_mode_tag(freeze_base_model: bool) -> str:
 class TokenPRMTrainer(Trainer):
     """Trainer with compact eval outputs and small checkpoints."""
 
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        labels = inputs["labels"]
+        outputs = model(**inputs)
+
+        pair_logits = pair_logits_from_causal_lm_logits(
+            outputs.logits,
+            labels,
+            self._label_tokens,
+        )
+        true_cls = binary_classes_from_labels(labels, self._label_tokens)
+        class_weights = torch.tensor(
+            [1.0, self._neg_loss_weight],
+            device=pair_logits.device,
+            dtype=pair_logits.dtype,
+        )
+        loss = torch.nn.functional.cross_entropy(
+            pair_logits,
+            true_cls,
+            weight=class_weights,
+        )
+        return (loss, outputs) if return_outputs else loss
+
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
         inputs = self._prepare_inputs(inputs)
         labels = inputs["labels"]
 
         with torch.no_grad():
-            outputs = model(**inputs)
-            loss = outputs.loss.mean().detach()
+            loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
+            loss = loss.mean().detach()
             pair_logits = pair_logits_from_causal_lm_logits(
                 outputs.logits,
                 labels,
@@ -158,16 +181,18 @@ def main() -> None:
     run_name = (
         f"prm-token-{training_mode_tag(FREEZE_BASE_MODEL)}-phase1-"
         f"{'firsterr' if STOP_AT_FIRST_NEGATIVE else 'allsteps'}-"
-        f"eval{int(EVAL_ROW_FRACTION * 100)}-qwen25-math-1.5b"
+        f"eval{int(EVAL_ROW_FRACTION * 100)}-"
+        f"negw{str(NEG_LOSS_WEIGHT).replace('.', 'p')}-qwen25-math-1.5b"
     )
     output_dir = os.path.join(OUTPUT_ROOT, run_name)
     logger.info(
-        "Token-PRM config: project=%s run_name=%s output_dir=%s label_tokens=(%r,%r)",
+        "Token-PRM config: project=%s run_name=%s output_dir=%s label_tokens=(%r,%r) neg_loss_weight=%.2f no_rebalance=true",
         os.environ["WANDB_PROJECT"],
         run_name,
         output_dir,
         label_tokens.positive_text,
         label_tokens.negative_text,
+        NEG_LOSS_WEIGHT,
     )
 
     base_model = AutoModelForCausalLM.from_pretrained(
@@ -215,6 +240,8 @@ def main() -> None:
         wandb.run.summary["label_tokens/negative_text"] = label_tokens.negative_text
         wandb.run.summary["label_tokens/positive_id"] = label_tokens.positive_id
         wandb.run.summary["label_tokens/negative_id"] = label_tokens.negative_id
+        wandb.run.summary["training/neg_loss_weight"] = NEG_LOSS_WEIGHT
+        wandb.run.summary["training/rebalance"] = "none"
 
     training_args = TrainingArguments(
         output_dir=output_dir,
@@ -258,6 +285,7 @@ def main() -> None:
         compute_metrics=compute_metrics,
     )
     trainer._label_tokens = label_tokens
+    trainer._neg_loss_weight = NEG_LOSS_WEIGHT
 
     logger.info("Starting token-prediction PRM training...")
     trainer.train()
