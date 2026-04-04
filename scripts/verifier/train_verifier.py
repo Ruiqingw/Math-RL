@@ -67,8 +67,8 @@ logger = logging.getLogger(__name__)
 MODEL_NAME   = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B"
 DATASET_NAME = "trl-lib/prm800k"
 OUTPUT_DIR   = "/root/autodl-tmp/prm_grpo/verifier_cls"
-MAX_LENGTH   = 1024
-TARGET_NEGATIVE_FRACTION = 0.40
+MAX_LENGTH   = 1536
+TARGET_NEGATIVE_FRACTION = 0.20
 WANDB_DEBUG_TABLE_ROWS = 24
 WANDB_STATS_SAMPLE_SIZE = 256
 
@@ -626,6 +626,9 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    # Keep the tail of the verifier prompt, where [Current step] and "Answer:"
+    # live, when long problem/context forces truncation.
+    tokenizer.truncation_side = "left"
 
     base_model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,

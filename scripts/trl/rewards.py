@@ -65,6 +65,7 @@ def _load_verifier(verifier_model_path: str, verifier_device: str):
     tokenizer = AutoTokenizer.from_pretrained(verifier_model_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.truncation_side = "left"
 
     model = PRMClassifier.from_pretrained(verifier_model_path, device=verifier_device)
     _CACHED_VERIFIER["key"] = cache_key

@@ -111,7 +111,7 @@ def score_steps(
     model: PRMClassifier,
     tokenizer: AutoTokenizer,
     device: str = "cuda",
-    max_length: int = 1024,
+    max_length: int = 1536,
     batch_size: int = 4,
 ) -> List[float]:
     """
@@ -194,6 +194,7 @@ def compute_reward(
     beta: float = 0.3,
     delta: float = 0.1,
     correct_threshold: float = 0.5,
+    max_length: int = 1536,
 ) -> Tuple[float, Dict]:
     """
     Compute the composite reward for one (problem, solution) pair.
@@ -222,7 +223,7 @@ def compute_reward(
             "step_scores": [], "n_steps": 0, "predicted_answer": predicted,
         }
 
-    step_scores = score_steps(problem, steps, model, tokenizer, device)
+    step_scores = score_steps(problem, steps, model, tokenizer, device, max_length=max_length)
 
     # — 3. Avg step reward ————————————————————————
     r_avg_step = sum(step_scores) / len(step_scores)

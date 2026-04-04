@@ -28,7 +28,7 @@ from train_verifier import MAX_LENGTH, PadCollator, VerifierDataset
 
 
 DEFAULT_DATASET_GLOB = "/root/autodl-tmp/prm_grpo/datasets/prm800k/trl-lib___prm800k/default/0.0.0/*/"
-DEFAULT_MODEL_PATH = "/root/autodl-tmp/prm_grpo/verifier_cls/checkpoint-2000"
+DEFAULT_MODEL_PATH = "/root/autodl-tmp/prm_grpo/verifier_cls/checkpoint-6000"
 
 
 def parse_args() -> argparse.Namespace:
@@ -163,6 +163,7 @@ def main() -> None:
     tokenizer = AutoTokenizer.from_pretrained(args.model_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.truncation_side = "left"
 
     load_device = "cpu" if args.device == "cpu" else "cuda"
     tensor_device = torch.device(args.device)
