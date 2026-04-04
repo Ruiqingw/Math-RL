@@ -69,6 +69,7 @@ DATASET_NAME = "trl-lib/prm800k"
 OUTPUT_DIR   = "/root/autodl-tmp/prm_grpo/verifier_cls"
 MAX_LENGTH   = 1536
 TARGET_NEGATIVE_FRACTION = 0.20
+FREEZE_BASE_MODEL = False
 WANDB_PROJECT = "math_rl_verifier"
 WANDB_DEBUG_TABLE_ROWS = 24
 WANDB_STATS_SAMPLE_SIZE = 256
@@ -82,6 +83,10 @@ def format_softneg_tag(target_neg_fraction: float) -> str:
     else:
         suffix = f"{percentage:.2f}".rstrip("0").rstrip(".").replace(".", "p")
     return f"softneg{suffix}"
+
+
+def get_training_mode_tag(freeze_base_model: bool) -> str:
+    return "headonly" if freeze_base_model else "fullft"
 
 
 # — Classification Head Wrapper ———————————————————————
@@ -641,8 +646,17 @@ def main():
     # live, when long problem/context forces truncation.
     tokenizer.truncation_side = "left"
     os.environ.setdefault("WANDB_PROJECT", WANDB_PROJECT)
-    run_name = f"prm-cls-{format_softneg_tag(TARGET_NEGATIVE_FRACTION)}-qwen25-math-1.5b"
-    logger.info("W&B config: project=%s run_name=%s", os.environ["WANDB_PROJECT"], run_name)
+    training_mode_tag = get_training_mode_tag(FREEZE_BASE_MODEL)
+    run_name = (
+        f"prm-cls-{training_mode_tag}-"
+        f"{format_softneg_tag(TARGET_NEGATIVE_FRACTION)}-qwen25-math-1.5b"
+    )
+    logger.info(
+        "W&B config: project=%s run_name=%s training_mode=%s",
+        os.environ["WANDB_PROJECT"],
+        run_name,
+        training_mode_tag,
+    )
 
     base_model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
@@ -654,6 +668,12 @@ def main():
     # Wrap with classification head
     hidden_size = base_model.config.hidden_size  # 1536 for Qwen2.5-Math-1.5B
     model = PRMClassifier(base_model, hidden_size)
+    if FREEZE_BASE_MODEL:
+        for param in model.base_model.parameters():
+            param.requires_grad = False
+        logger.info("Training mode: head-only (base model frozen)")
+    else:
+        logger.info("Training mode: full fine-tuning (base model trainable)")
     # Move classification head to same device/dtype as base model
     first_device = next(base_model.parameters()).device
     model.score = model.score.to(device=first_device, dtype=torch.bfloat16)
