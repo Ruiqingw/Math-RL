@@ -107,7 +107,9 @@ def verifier_shaping_reward(
             batch_size=verifier_batch_size,
         )
 
-        r_avg_step = sum(step_scores) / len(step_scores)
+        # Center step scores around the verifier threshold so the average
+        # contribution can be positive or negative instead of always positive.
+        r_avg_step = sum(score - verifier_threshold for score in step_scores) / len(step_scores)
         r_first_error = 0.0
         for idx, score in enumerate(step_scores):
             if score < verifier_threshold:
