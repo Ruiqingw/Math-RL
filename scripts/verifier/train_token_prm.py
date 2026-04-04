@@ -68,6 +68,9 @@ MAX_LENGTH = 1536
 STOP_AT_FIRST_NEGATIVE = True
 FREEZE_BASE_MODEL = False
 WANDB_PROJECT = "math_rl_token_prm"
+PER_DEVICE_TRAIN_BATCH_SIZE = 4
+PER_DEVICE_EVAL_BATCH_SIZE = 8
+EVAL_ROW_FRACTION = 0.5
 
 
 def training_mode_tag(freeze_base_model: bool) -> str:
@@ -154,7 +157,8 @@ def main() -> None:
     os.environ.setdefault("WANDB_PROJECT", WANDB_PROJECT)
     run_name = (
         f"prm-token-{training_mode_tag(FREEZE_BASE_MODEL)}-phase1-"
-        f"{'firsterr' if STOP_AT_FIRST_NEGATIVE else 'allsteps'}-qwen25-math-1.5b"
+        f"{'firsterr' if STOP_AT_FIRST_NEGATIVE else 'allsteps'}-"
+        f"eval{int(EVAL_ROW_FRACTION * 100)}-qwen25-math-1.5b"
     )
     output_dir = os.path.join(OUTPUT_ROOT, run_name)
     logger.info(
@@ -180,6 +184,7 @@ def main() -> None:
         logger.info("Training mode: full fine-tuning token PRM")
 
     ds = load_arrow_dataset()
+    eval_max_rows = max(1, int(len(ds["test"]) * EVAL_ROW_FRACTION))
     train_ds = TokenPRMDataset(
         ds["train"],
         tokenizer,
@@ -192,14 +197,17 @@ def main() -> None:
         tokenizer,
         label_tokens,
         max_length=MAX_LENGTH,
+        max_rows=eval_max_rows,
         stop_at_first_negative=STOP_AT_FIRST_NEGATIVE,
     )
     logger.info(
-        "Token-PRM dataset stats: train(pos=%s neg=%s) eval(pos=%s neg=%s)",
+        "Token-PRM dataset stats: train(pos=%s neg=%s) eval(pos=%s neg=%s, max_rows=%s, row_fraction=%.2f)",
         f"{train_ds.n_pos:,}",
         f"{train_ds.n_neg:,}",
         f"{eval_ds.n_pos:,}",
         f"{eval_ds.n_neg:,}",
+        f"{eval_max_rows:,}",
+        EVAL_ROW_FRACTION,
     )
 
     if wandb is not None and wandb.run is not None:
@@ -211,8 +219,8 @@ def main() -> None:
     training_args = TrainingArguments(
         output_dir=output_dir,
         num_train_epochs=3,
-        per_device_train_batch_size=2,
-        per_device_eval_batch_size=4,
+        per_device_train_batch_size=PER_DEVICE_TRAIN_BATCH_SIZE,
+        per_device_eval_batch_size=PER_DEVICE_EVAL_BATCH_SIZE,
         gradient_accumulation_steps=8,
         learning_rate=2e-6,
         warmup_ratio=0.05,
