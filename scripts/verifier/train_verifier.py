@@ -66,7 +66,7 @@ logger = logging.getLogger(__name__)
 # — Defaults ——————————————————————————————————————
 MODEL_NAME   = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B"
 DATASET_NAME = "trl-lib/prm800k"
-OUTPUT_DIR   = "/root/autodl-tmp/prm_grpo/verifier_cls"
+OUTPUT_ROOT  = "/root/autodl-tmp/prm_grpo/verifier_cls_runs"
 MAX_LENGTH   = 1536
 TARGET_NEGATIVE_FRACTION = 0.20
 FREEZE_BASE_MODEL = False
@@ -664,6 +664,8 @@ def main():
         run_name,
         training_mode_tag,
     )
+    output_dir = os.path.join(OUTPUT_ROOT, run_name)
+    logger.info("Checkpoint output dir: %s", output_dir)
 
     base_model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
@@ -700,7 +702,7 @@ def main():
     collator = PadCollator(tokenizer.pad_token_id)
 
     training_args = TrainingArguments(
-        output_dir          = OUTPUT_DIR,
+        output_dir          = output_dir,
         num_train_epochs     = 3,
         per_device_train_batch_size = 4,
         per_device_eval_batch_size  = 8,
@@ -757,7 +759,7 @@ def main():
     logger.info("Starting verifier training (classification head)...")
     trainer.train()
 
-    save_path = os.path.join(OUTPUT_DIR, "final")
+    save_path = os.path.join(output_dir, "final")
     logger.info(f"Saving final model to {save_path}")
     trainer.save_model(save_path)
     logger.info("Done.")
