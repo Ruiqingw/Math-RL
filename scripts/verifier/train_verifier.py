@@ -341,6 +341,13 @@ class ClassificationTrainer(Trainer):
             self.tokenizer.save_pretrained(output_dir)
         logger.info(f"Saved model + cls_head to {output_dir}")
 
+    def _save_optimizer_and_scheduler(self, output_dir):
+        """
+        Skip optimizer/scheduler checkpointing to keep verifier checkpoints small.
+        We only need model weights for downstream threshold tuning and reward use.
+        """
+        logger.info("Skipping optimizer/scheduler save for verifier checkpoint: %s", output_dir)
+
 
     def get_train_dataloader(self) -> DataLoader:
         """
