@@ -67,13 +67,19 @@ def _extract_chosen_step(step: Dict[str, Any]) -> Optional[Tuple[str, int]]:
     if chosen_completion is not None and completions:
         if 0 <= chosen_completion < len(completions):
             chosen = completions[chosen_completion]
-            return chosen["text"], int(chosen["rating"])
+            rating = chosen.get("rating")
+            if rating is None:
+                return None
+            return chosen["text"], int(rating)
         return None
 
     if human_completion is not None:
         if isinstance(human_completion, dict):
             text = human_completion["text"]
-            rating = int(human_completion.get("rating", 1))
+            raw_rating = human_completion.get("rating", 1)
+            if raw_rating is None:
+                return None
+            rating = int(raw_rating)
         else:
             text = str(human_completion)
             rating = 1
@@ -81,7 +87,10 @@ def _extract_chosen_step(step: Dict[str, Any]) -> Optional[Tuple[str, int]]:
 
     if len(completions) == 1:
         chosen = completions[0]
-        return chosen["text"], int(chosen["rating"])
+        rating = chosen.get("rating")
+        if rating is None:
+            return None
+        return chosen["text"], int(rating)
 
     return None
 
