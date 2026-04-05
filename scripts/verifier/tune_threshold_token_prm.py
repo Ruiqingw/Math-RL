@@ -6,7 +6,6 @@ Sweep decision thresholds for the token-prediction PRM.
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import os
 import sys
@@ -14,7 +13,6 @@ from typing import Dict, List
 
 import numpy as np
 import torch
-from datasets import Dataset as HFDataset
 from torch.utils.data import DataLoader
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -28,9 +26,13 @@ from token_prm import (
     load_token_prm,
     pair_logits_from_causal_lm_logits,
 )
+from openai_prm_raw import (
+    DEFAULT_RAW_DATA_DIR,
+    build_raw_phase2_dataset,
+    phase2_cache_dir,
+)
 
 
-DEFAULT_DATASET_GLOB = "/root/autodl-tmp/prm_grpo/datasets/prm800k/trl-lib___prm800k/default/0.0.0/*/"
 DEFAULT_MAX_LENGTH = 1536
 
 
@@ -38,9 +40,18 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Tune thresholds for a token-prediction PRM.")
     parser.add_argument("--model-path", required=True, help="Checkpoint directory.")
     parser.add_argument(
-        "--dataset-glob",
-        default=DEFAULT_DATASET_GLOB,
-        help="Glob pointing to cached PRM800K arrow shard directory.",
+        "--dataset-source",
+        default="raw_phase2",
+        choices=["raw_phase2"],
+        help="Which dataset view to evaluate on.",
+    )
+    parser.add_argument("--raw-data-dir", default=DEFAULT_RAW_DATA_DIR)
+    parser.add_argument("--cache-dir", default="")
+    parser.add_argument(
+        "--neutral-policy",
+        default="nonnegative",
+        choices=["nonnegative", "positive_only"],
+        help="How to map rating=0 when converting {-1,0,+1} to binary labels.",
     )
     parser.add_argument("--split", default="test", choices=["train", "test"])
     parser.add_argument("--device", default="cuda")
@@ -64,17 +75,31 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_eval_dataset(tokenizer, label_tokens, dataset_glob: str, split: str, max_length: int, all_steps: bool):
-    matches = glob.glob(dataset_glob)
-    if not matches:
-        raise FileNotFoundError(f"No cached dataset directory matched: {dataset_glob}")
+def load_eval_dataset(
+    tokenizer,
+    label_tokens,
+    dataset_source: str,
+    raw_data_dir: str,
+    cache_dir: str,
+    neutral_policy: str,
+    split: str,
+    max_length: int,
+    all_steps: bool,
+):
+    if dataset_source != "raw_phase2":
+        raise ValueError(f"Unsupported dataset source: {dataset_source}")
 
-    arrow_dir = matches[0]
-    split_path = os.path.join(arrow_dir, f"prm800k-{split}.arrow")
-    if not os.path.exists(split_path):
-        raise FileNotFoundError(f"Cached split not found: {split_path}")
-
-    hf_split = HFDataset.from_file(split_path)
+    effective_cache_dir = cache_dir or phase2_cache_dir(
+        neutral_policy=neutral_policy,
+        stop_at_first_negative=not all_steps,
+    )
+    dataset = build_raw_phase2_dataset(
+        raw_data_dir=raw_data_dir,
+        cache_dir=effective_cache_dir,
+        neutral_policy=neutral_policy,
+        stop_at_first_negative=not all_steps,
+    )
+    hf_split = dataset[split]
     return TokenPRMDataset(
         hf_split,
         tokenizer,
@@ -161,7 +186,10 @@ def main() -> None:
     eval_ds = load_eval_dataset(
         tokenizer=tokenizer,
         label_tokens=label_tokens,
-        dataset_glob=args.dataset_glob,
+        dataset_source=args.dataset_source,
+        raw_data_dir=args.raw_data_dir,
+        cache_dir=args.cache_dir,
+        neutral_policy=args.neutral_policy,
         split=args.split,
         max_length=args.max_length,
         all_steps=args.all_steps,

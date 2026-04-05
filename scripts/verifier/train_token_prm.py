@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
 """
-Train an OpenAI-style token-prediction PRM on the processed PRM800K cache.
+Train an OpenAI-style token-prediction PRM.
 
-Design choices:
-- no extra classification head
-- the model predicts a single positive/negative supervision token
-- no class rebalancing
-- first-error-only supervision enabled by default for a closer match to the
-  PRM paper's prefix-based labeling signal
+Current default data path:
+- raw OpenAI PRM800K phase 2
+- reconstructed chosen trajectories
+- first-error-only truncation
+- rating >= 0 treated as non-error
 """
 
 from __future__ import annotations
 
-import glob
 import logging
 import os
 import sys
@@ -20,7 +18,6 @@ from typing import Dict, Optional
 
 import numpy as np
 import torch
-from datasets import Dataset as HFDataset, DatasetDict
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
@@ -40,6 +37,11 @@ from token_prm import (
     binary_classes_from_labels,
     pair_logits_from_causal_lm_logits,
     select_label_token_pair,
+)
+from openai_prm_raw import (
+    DEFAULT_RAW_DATA_DIR,
+    build_raw_phase2_dataset,
+    phase2_cache_dir,
 )
 
 try:
@@ -63,7 +65,9 @@ logger = logging.getLogger(__name__)
 
 MODEL_NAME = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B"
 OUTPUT_ROOT = "/root/autodl-tmp/prm_grpo/token_prm_runs"
-ARROW_GLOB = "/root/autodl-tmp/prm_grpo/datasets/prm800k/trl-lib___prm800k/default/0.0.0/*/"
+DATASET_SOURCE = "raw_phase2"
+RAW_DATA_DIR = DEFAULT_RAW_DATA_DIR
+RAW_NEUTRAL_POLICY = "nonnegative"
 MAX_LENGTH = 1536
 STOP_AT_FIRST_NEGATIVE = True
 FREEZE_BASE_MODEL = False
@@ -77,6 +81,19 @@ FOCAL_GAMMA = 2.0
 
 def training_mode_tag(freeze_base_model: bool) -> str:
     return "headonly" if freeze_base_model else "fullft"
+
+
+def dataset_tag(
+    dataset_source: str,
+    *,
+    neutral_policy: str,
+    stop_at_first_negative: bool,
+) -> str:
+    if dataset_source == "raw_phase2":
+        neutral_tag = "nonneg" if neutral_policy == "nonnegative" else "posonly"
+        prefix_tag = "firsterr" if stop_at_first_negative else "allsteps"
+        return f"phase2raw-{neutral_tag}-{prefix_tag}"
+    raise ValueError(f"Unknown dataset source: {dataset_source}")
 
 
 class TokenPRMTrainer(Trainer):
@@ -196,18 +213,24 @@ def compute_metrics(eval_pred):
     }
 
 
-def load_arrow_dataset() -> DatasetDict:
-    matches = glob.glob(ARROW_GLOB)
-    if not matches:
-        raise FileNotFoundError(f"No cached PRM800K arrow directory matched: {ARROW_GLOB}")
-    arrow_dir = matches[0]
-    logger.info("Loading token-PRM dataset from arrow cache: %s", arrow_dir)
-    return DatasetDict(
-        {
-            "train": HFDataset.from_file(os.path.join(arrow_dir, "prm800k-train.arrow")),
-            "test": HFDataset.from_file(os.path.join(arrow_dir, "prm800k-test.arrow")),
-        }
-    )
+def load_training_dataset():
+    if DATASET_SOURCE == "raw_phase2":
+        logger.info(
+            "Loading token-PRM dataset from raw OpenAI PRM800K phase2: raw_dir=%s cache_dir=%s neutral_policy=%s stop_at_first_negative=%s",
+            RAW_DATA_DIR,
+            phase2_cache_dir(
+                neutral_policy=RAW_NEUTRAL_POLICY,
+                stop_at_first_negative=STOP_AT_FIRST_NEGATIVE,
+            ),
+            RAW_NEUTRAL_POLICY,
+            STOP_AT_FIRST_NEGATIVE,
+        )
+        return build_raw_phase2_dataset(
+            raw_data_dir=RAW_DATA_DIR,
+            neutral_policy=RAW_NEUTRAL_POLICY,
+            stop_at_first_negative=STOP_AT_FIRST_NEGATIVE,
+        )
+    raise ValueError(f"Unsupported dataset source: {DATASET_SOURCE}")
 
 
 def main() -> None:
@@ -219,18 +242,19 @@ def main() -> None:
 
     os.environ.setdefault("WANDB_PROJECT", WANDB_PROJECT)
     run_name = (
-        f"prm-token-{training_mode_tag(FREEZE_BASE_MODEL)}-phase1-"
-        f"{'firsterr' if STOP_AT_FIRST_NEGATIVE else 'allsteps'}-"
+        f"prm-token-{training_mode_tag(FREEZE_BASE_MODEL)}-"
+        f"{dataset_tag(DATASET_SOURCE, neutral_policy=RAW_NEUTRAL_POLICY, stop_at_first_negative=STOP_AT_FIRST_NEGATIVE)}-"
         f"eval{int(EVAL_ROW_FRACTION * 100)}-"
         f"negw{str(NEG_LOSS_WEIGHT).replace('.', 'p')}-"
         f"focalg{str(FOCAL_GAMMA).replace('.', 'p')}-qwen25-math-1.5b"
     )
     output_dir = os.path.join(OUTPUT_ROOT, run_name)
     logger.info(
-        "Token-PRM config: project=%s run_name=%s output_dir=%s label_tokens=(%r,%r) neg_loss_weight=%.2f focal_gamma=%.2f no_rebalance=true",
+        "Token-PRM config: project=%s run_name=%s output_dir=%s dataset_source=%s label_tokens=(%r,%r) neg_loss_weight=%.2f focal_gamma=%.2f no_rebalance=true",
         os.environ["WANDB_PROJECT"],
         run_name,
         output_dir,
+        DATASET_SOURCE,
         label_tokens.positive_text,
         label_tokens.negative_text,
         NEG_LOSS_WEIGHT,
@@ -250,7 +274,7 @@ def main() -> None:
     else:
         logger.info("Training mode: full fine-tuning token PRM")
 
-    ds = load_arrow_dataset()
+    ds = load_training_dataset()
     eval_max_rows = max(1, int(len(ds["test"]) * EVAL_ROW_FRACTION))
     train_ds = TokenPRMDataset(
         ds["train"],
@@ -308,7 +332,7 @@ def main() -> None:
         remove_unused_columns=False,
         report_to="wandb",
         run_name=run_name,
-        metric_for_best_model="eval_balanced_accuracy",
+        metric_for_best_model="eval_best_balanced_accuracy",
         greater_is_better=True,
     )
 
