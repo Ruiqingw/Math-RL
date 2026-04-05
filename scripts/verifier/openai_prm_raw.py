@@ -2,8 +2,8 @@
 Utilities for loading raw OpenAI PRM800K data into the stepwise format used by
 our verifier/token-PRM trainers.
 
-The raw repository stores one full labeled solution per JSONL line. This module
-reconstructs the chosen trajectory for each labeled solution and emits rows of:
+The raw repository stores one full labeled solution per JSONL line. We expand
+each labeled solution into one or more stepwise rows:
 
     {
         "prompt": <problem text>,
@@ -11,10 +11,9 @@ reconstructs the chosen trajectory for each labeled solution and emits rows of:
         "labels": [bool, bool, ...],
     }
 
-Design choices for the current token-PRM line:
-- default to raw phase 2 only
-- default to first-error-only truncation
-- treat rating >= 0 as non-error (positive) and rating < 0 as error (negative)
+For phase 2 this is important: when `chosen_completion` is null at the first
+mistake, the listed completions are still labeled alternatives and should be
+emitted as terminal branches rather than discarded.
 """
 
 from __future__ import annotations
@@ -59,78 +58,123 @@ def rating_to_binary_label(rating: int, neutral_policy: str = "nonnegative") -> 
     raise ValueError(f"Unknown neutral policy: {neutral_policy}")
 
 
-def _extract_chosen_step(step: Dict[str, Any]) -> Optional[Tuple[str, int]]:
-    completions = step.get("completions") or []
-    chosen_completion = step.get("chosen_completion")
-    human_completion = step.get("human_completion")
-
-    if chosen_completion is not None and completions:
-        if 0 <= chosen_completion < len(completions):
-            chosen = completions[chosen_completion]
-            rating = chosen.get("rating")
-            if rating is None:
-                return None
-            return chosen["text"], int(rating)
-        return None
-
-    if human_completion is not None:
-        if isinstance(human_completion, dict):
-            text = human_completion["text"]
-            raw_rating = human_completion.get("rating", 1)
-            if raw_rating is None:
-                return None
-            rating = int(raw_rating)
-        else:
-            text = str(human_completion)
-            rating = 1
-        return text, rating
-
-    if len(completions) == 1:
-        chosen = completions[0]
-        rating = chosen.get("rating")
-        if rating is None:
-            return None
-        return chosen["text"], int(rating)
-
-    return None
-
-
-def process_phase2_example(
-    example: Dict[str, Any],
+def _truncate_row(
+    prompt: str,
+    completions: List[str],
+    labels: List[bool],
     *,
-    neutral_policy: str = "nonnegative",
-    stop_at_first_negative: bool = True,
+    stop_at_first_negative: bool,
 ) -> Optional[Dict[str, Any]]:
-    prompt = example["question"]["problem"]
-    labeled_steps = example["label"]["steps"]
-
-    completions: List[str] = []
-    labels: List[bool] = []
-
-    for step in labeled_steps:
-        chosen = _extract_chosen_step(step)
-        if chosen is None:
-            break
-
-        text, rating = chosen
-        if not text:
-            break
-
-        label = rating_to_binary_label(rating, neutral_policy=neutral_policy)
-        completions.append(text)
-        labels.append(label)
-
-        if stop_at_first_negative and not label:
-            break
-
+    completions, labels = _truncate_to_first_negative(
+        completions,
+        labels,
+        stop_at_first_negative=stop_at_first_negative,
+    )
     if not completions:
         return None
-
     return {
         "prompt": prompt,
         "completions": completions,
         "labels": labels,
     }
+
+
+def process_phase2_example_rows(
+    example: Dict[str, Any],
+    *,
+    neutral_policy: str = "nonnegative",
+    stop_at_first_negative: bool = True,
+) -> List[Dict[str, Any]]:
+    prompt = example["question"]["problem"]
+    labeled_steps = example["label"]["steps"]
+
+    outputs: List[Dict[str, Any]] = []
+    previous_completions: List[str] = []
+    previous_labels: List[bool] = []
+
+    for step in labeled_steps:
+        completions = step.get("completions") or []
+        human_completion = step.get("human_completion")
+        chosen_completion = step.get("chosen_completion")
+
+        if not completions and human_completion is None:
+            break
+
+        for completion_idx, completion in enumerate(completions):
+            if completion_idx == chosen_completion:
+                continue
+            rating = completion.get("rating")
+            if rating is None:
+                continue
+            content = completion.get("text")
+            if not content:
+                continue
+            label = rating_to_binary_label(int(rating), neutral_policy=neutral_policy)
+            row = _truncate_row(
+                prompt,
+                previous_completions[:] + [content],
+                previous_labels[:] + [label],
+                stop_at_first_negative=stop_at_first_negative,
+            )
+            if row is not None:
+                outputs.append(row)
+
+        if chosen_completion is not None and completions:
+            if not (0 <= chosen_completion < len(completions)):
+                break
+            chosen = completions[chosen_completion]
+            rating = chosen.get("rating")
+            content = chosen.get("text")
+            if rating is None or not content:
+                break
+            label = rating_to_binary_label(int(rating), neutral_policy=neutral_policy)
+            previous_completions.append(content)
+            previous_labels.append(label)
+            if stop_at_first_negative and not label:
+                break
+            continue
+
+        if human_completion is not None:
+            if isinstance(human_completion, dict):
+                content = human_completion.get("text")
+                rating = human_completion.get("rating", 1)
+            else:
+                content = str(human_completion)
+                rating = 1
+            if rating is None or not content:
+                break
+            label = rating_to_binary_label(int(rating), neutral_policy=neutral_policy)
+            previous_completions.append(content)
+            previous_labels.append(label)
+            if stop_at_first_negative and not label:
+                break
+            continue
+
+        if len(completions) == 1:
+            only_completion = completions[0]
+            rating = only_completion.get("rating")
+            content = only_completion.get("text")
+            if rating is None or not content:
+                break
+            label = rating_to_binary_label(int(rating), neutral_policy=neutral_policy)
+            previous_completions.append(content)
+            previous_labels.append(label)
+            if stop_at_first_negative and not label:
+                break
+            continue
+
+        if chosen_completion is None:
+            break
+
+    final_row = _truncate_row(
+        prompt,
+        previous_completions,
+        previous_labels,
+        stop_at_first_negative=stop_at_first_negative,
+    )
+    if final_row is not None:
+        outputs.append(final_row)
+    return outputs
 
 
 def process_phase2_batch(
@@ -144,13 +188,12 @@ def process_phase2_batch(
 
     for idx in range(batch_size):
         example = {key: value[idx] for key, value in examples.items()}
-        row = process_phase2_example(
+        rows = process_phase2_example_rows(
             example,
             neutral_policy=neutral_policy,
             stop_at_first_negative=stop_at_first_negative,
         )
-        if row is not None:
-            outputs.append(row)
+        outputs.extend(rows)
 
     if not outputs:
         return {"prompt": [], "completions": [], "labels": []}
