@@ -156,7 +156,7 @@ def compute_metrics(eval_pred):
     if pos_mask.any() and neg_mask.any():
         pos_scores = neg_probs[pos_mask]
         neg_scores = neg_probs[neg_mask]
-        wins = sum((n > p).sum() + 0.5 * (n == p).sum() for n in neg_scores)
+        wins = sum((n > pos_scores).sum() + 0.5 * (n == pos_scores).sum() for n in neg_scores)
         neg_auroc = float(wins / (len(neg_scores) * len(pos_scores)))
 
     neg_average_precision = 0.0
