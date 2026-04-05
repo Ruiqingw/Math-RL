@@ -72,6 +72,7 @@ PER_DEVICE_TRAIN_BATCH_SIZE = 2
 PER_DEVICE_EVAL_BATCH_SIZE = 4
 EVAL_ROW_FRACTION = 0.25
 NEG_LOSS_WEIGHT = 10.0
+FOCAL_GAMMA = 2.0
 
 
 def training_mode_tag(freeze_base_model: bool) -> str:
@@ -96,11 +97,12 @@ class TokenPRMTrainer(Trainer):
             device=pair_logits.device,
             dtype=pair_logits.dtype,
         )
-        loss = torch.nn.functional.cross_entropy(
-            pair_logits,
-            true_cls,
-            weight=class_weights,
-        )
+        log_probs = torch.nn.functional.log_softmax(pair_logits, dim=-1)
+        log_pt = log_probs.gather(1, true_cls.unsqueeze(1)).squeeze(1)
+        pt = log_pt.exp()
+        sample_weights = class_weights[true_cls]
+        focal_factor = (1.0 - pt).pow(self._focal_gamma)
+        loss = -(sample_weights * focal_factor * log_pt).mean()
         return (loss, outputs) if return_outputs else loss
 
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
@@ -182,17 +184,19 @@ def main() -> None:
         f"prm-token-{training_mode_tag(FREEZE_BASE_MODEL)}-phase1-"
         f"{'firsterr' if STOP_AT_FIRST_NEGATIVE else 'allsteps'}-"
         f"eval{int(EVAL_ROW_FRACTION * 100)}-"
-        f"negw{str(NEG_LOSS_WEIGHT).replace('.', 'p')}-qwen25-math-1.5b"
+        f"negw{str(NEG_LOSS_WEIGHT).replace('.', 'p')}-"
+        f"focalg{str(FOCAL_GAMMA).replace('.', 'p')}-qwen25-math-1.5b"
     )
     output_dir = os.path.join(OUTPUT_ROOT, run_name)
     logger.info(
-        "Token-PRM config: project=%s run_name=%s output_dir=%s label_tokens=(%r,%r) neg_loss_weight=%.2f no_rebalance=true",
+        "Token-PRM config: project=%s run_name=%s output_dir=%s label_tokens=(%r,%r) neg_loss_weight=%.2f focal_gamma=%.2f no_rebalance=true",
         os.environ["WANDB_PROJECT"],
         run_name,
         output_dir,
         label_tokens.positive_text,
         label_tokens.negative_text,
         NEG_LOSS_WEIGHT,
+        FOCAL_GAMMA,
     )
 
     base_model = AutoModelForCausalLM.from_pretrained(
@@ -241,6 +245,7 @@ def main() -> None:
         wandb.run.summary["label_tokens/positive_id"] = label_tokens.positive_id
         wandb.run.summary["label_tokens/negative_id"] = label_tokens.negative_id
         wandb.run.summary["training/neg_loss_weight"] = NEG_LOSS_WEIGHT
+        wandb.run.summary["training/focal_gamma"] = FOCAL_GAMMA
         wandb.run.summary["training/rebalance"] = "none"
 
     training_args = TrainingArguments(
@@ -286,6 +291,7 @@ def main() -> None:
     )
     trainer._label_tokens = label_tokens
     trainer._neg_loss_weight = NEG_LOSS_WEIGHT
+    trainer._focal_gamma = FOCAL_GAMMA
 
     logger.info("Starting token-prediction PRM training...")
     trainer.train()
