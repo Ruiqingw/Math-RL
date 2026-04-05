@@ -60,9 +60,15 @@ def main() -> None:
         n_steps = sum(len(row["labels"]) for row in hf_split)
         n_neg = sum(sum(1 for label in row["labels"] if not label) for row in hf_split)
         n_pos = n_steps - n_neg
+        n_neg_rows = sum(
+            1
+            for row in hf_split
+            if len(row["labels"]) > 0 and (not bool(row["labels"][-1]))
+        )
         print(
             f"{split}: rows={n_rows:,} steps={n_steps:,} "
-            f"pos={n_pos:,} neg={n_neg:,} neg_frac={(n_neg / max(n_steps, 1)):.4f}"
+            f"pos={n_pos:,} neg={n_neg:,} neg_step_frac={(n_neg / max(n_steps, 1)):.4f} "
+            f"neg_row_frac={(n_neg_rows / max(n_rows, 1)):.4f} neg_rows={n_neg_rows:,}"
         )
 
 
