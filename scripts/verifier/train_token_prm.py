@@ -70,7 +70,7 @@ FREEZE_BASE_MODEL = False
 WANDB_PROJECT = "math_rl_token_prm"
 PER_DEVICE_TRAIN_BATCH_SIZE = 2
 PER_DEVICE_EVAL_BATCH_SIZE = 4
-EVAL_ROW_FRACTION = 0.25
+EVAL_ROW_FRACTION = 0.125
 NEG_LOSS_WEIGHT = 10.0
 FOCAL_GAMMA = 2.0
 
@@ -141,6 +141,8 @@ def compute_metrics(eval_pred):
     pair_logits, labels = eval_pred
     pred_cls = np.argmax(pair_logits, axis=1)
     true_cls = np.asarray(labels).reshape(-1)
+    probs = torch.softmax(torch.tensor(pair_logits), dim=-1).numpy()
+    neg_probs = probs[:, 1]
 
     accuracy = float((pred_cls == true_cls).mean())
     pos_mask = true_cls == 0
@@ -149,12 +151,48 @@ def compute_metrics(eval_pred):
     neg_accuracy = float((pred_cls[neg_mask] == 1).mean()) if neg_mask.any() else 0.0
     balanced_accuracy = 0.5 * (pos_accuracy + neg_accuracy)
     pred_neg_fraction = float((pred_cls == 1).mean())
+
+    neg_auroc = 0.5
+    if pos_mask.any() and neg_mask.any():
+        pos_scores = neg_probs[pos_mask]
+        neg_scores = neg_probs[neg_mask]
+        wins = sum((n > p).sum() + 0.5 * (n == p).sum() for n in neg_scores)
+        neg_auroc = float(wins / (len(neg_scores) * len(pos_scores)))
+
+    neg_average_precision = 0.0
+    if neg_mask.any():
+        order = np.argsort(-neg_probs)
+        sorted_labels = true_cls[order] == 1
+        tp = np.cumsum(sorted_labels)
+        precision = tp / np.arange(1, len(sorted_labels) + 1)
+        neg_average_precision = float((precision[sorted_labels]).sum() / max(sorted_labels.sum(), 1))
+
+    thresholds = np.unique(neg_probs)
+    best_balanced_accuracy = balanced_accuracy
+    best_balanced_accuracy_threshold = 0.5
+    for threshold in thresholds:
+        threshold_pred = (neg_probs >= threshold).astype(np.int64)
+        threshold_pos_accuracy = (
+            float((threshold_pred[pos_mask] == 0).mean()) if pos_mask.any() else 0.0
+        )
+        threshold_neg_accuracy = (
+            float((threshold_pred[neg_mask] == 1).mean()) if neg_mask.any() else 0.0
+        )
+        threshold_balanced_accuracy = 0.5 * (threshold_pos_accuracy + threshold_neg_accuracy)
+        if threshold_balanced_accuracy > best_balanced_accuracy:
+            best_balanced_accuracy = float(threshold_balanced_accuracy)
+            best_balanced_accuracy_threshold = float(threshold)
+
     return {
         "accuracy": accuracy,
         "pos_accuracy": pos_accuracy,
         "neg_accuracy": neg_accuracy,
         "balanced_accuracy": float(balanced_accuracy),
         "pred_neg_fraction": pred_neg_fraction,
+        "neg_auroc": neg_auroc,
+        "neg_average_precision": neg_average_precision,
+        "best_balanced_accuracy": float(best_balanced_accuracy),
+        "best_balanced_accuracy_threshold": float(best_balanced_accuracy_threshold),
     }
 
 
