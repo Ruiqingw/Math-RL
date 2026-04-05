@@ -71,7 +71,7 @@ WANDB_PROJECT = "math_rl_token_prm"
 PER_DEVICE_TRAIN_BATCH_SIZE = 2
 PER_DEVICE_EVAL_BATCH_SIZE = 4
 EVAL_ROW_FRACTION = 0.5
-NEG_LOSS_WEIGHT = 3.0
+NEG_LOSS_WEIGHT = 10.0
 
 
 def training_mode_tag(freeze_base_model: bool) -> str:
