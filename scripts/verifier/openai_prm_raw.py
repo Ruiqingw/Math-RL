@@ -58,6 +58,21 @@ def rating_to_binary_label(rating: int, neutral_policy: str = "nonnegative") -> 
     raise ValueError(f"Unknown neutral policy: {neutral_policy}")
 
 
+def _truncate_to_first_negative(
+    completions: List[str],
+    labels: List[bool],
+    *,
+    stop_at_first_negative: bool,
+) -> Tuple[List[str], List[bool]]:
+    if not stop_at_first_negative:
+        return list(completions), list(labels)
+
+    for idx, label in enumerate(labels):
+        if not label:
+            return list(completions[: idx + 1]), list(labels[: idx + 1])
+    return list(completions), list(labels)
+
+
 def _truncate_row(
     prompt: str,
     completions: List[str],
