@@ -77,7 +77,8 @@ PER_DEVICE_EVAL_BATCH_SIZE = 4
 EVAL_ROW_FRACTION = 0.125
 NEG_LOSS_WEIGHT = 10.0
 FOCAL_GAMMA = 2.0
-DEBUG_EVAL_DUMP_ROWS_PER_CLASS = 3
+MAX_STEPS = 6000
+WARMUP_RATIO = 0.01
 
 
 def training_mode_tag(freeze_base_model: bool) -> str:
@@ -169,9 +170,6 @@ def compute_metrics(eval_pred):
     neg_accuracy = float((pred_cls[neg_mask] == 1).mean()) if neg_mask.any() else 0.0
     balanced_accuracy = 0.5 * (pos_accuracy + neg_accuracy)
     pred_neg_fraction = float((pred_cls == 1).mean())
-    neg_prob_mean_pos = float(neg_probs[pos_mask].mean()) if pos_mask.any() else 0.0
-    neg_prob_mean_neg = float(neg_probs[neg_mask].mean()) if neg_mask.any() else 0.0
-    neg_prob_gap = float(neg_prob_mean_neg - neg_prob_mean_pos)
 
     neg_auroc = 0.5
     if pos_mask.any() and neg_mask.any():
@@ -204,42 +202,12 @@ def compute_metrics(eval_pred):
             best_balanced_accuracy = float(threshold_balanced_accuracy)
             best_balanced_accuracy_threshold = float(threshold)
 
-    debug_rows = []
-    for class_name, class_value, mask in (
-        ("pos", 0, pos_mask),
-        ("neg", 1, neg_mask),
-    ):
-        class_indices = np.flatnonzero(mask)[:DEBUG_EVAL_DUMP_ROWS_PER_CLASS]
-        for idx in class_indices:
-            debug_rows.append(
-                {
-                    "class": class_name,
-                    "true_cls": int(true_cls[idx]),
-                    "pred_cls": int(pred_cls[idx]),
-                    "pos_logit": float(pair_logits[idx][0]),
-                    "neg_logit": float(pair_logits[idx][1]),
-                    "neg_prob": float(neg_probs[idx]),
-                }
-            )
-    if debug_rows:
-        logger.info(
-            "Token-PRM eval debug: neg_prob_mean_pos=%.4f neg_prob_mean_neg=%.4f gap=%.4f pred_neg_fraction=%.4f rows=%s",
-            neg_prob_mean_pos,
-            neg_prob_mean_neg,
-            neg_prob_gap,
-            pred_neg_fraction,
-            debug_rows,
-        )
-
     return {
         "accuracy": accuracy,
         "pos_accuracy": pos_accuracy,
         "neg_accuracy": neg_accuracy,
         "balanced_accuracy": float(balanced_accuracy),
         "pred_neg_fraction": pred_neg_fraction,
-        "neg_prob_mean_pos": neg_prob_mean_pos,
-        "neg_prob_mean_neg": neg_prob_mean_neg,
-        "neg_prob_gap": neg_prob_gap,
         "neg_auroc": neg_auroc,
         "neg_average_precision": neg_average_precision,
         "best_balanced_accuracy": float(best_balanced_accuracy),
@@ -334,6 +302,16 @@ def main() -> None:
         f"{eval_max_rows:,}",
         EVAL_ROW_FRACTION,
     )
+    samples_per_optimizer_step = PER_DEVICE_TRAIN_BATCH_SIZE * 8
+    full_run_steps = int(np.ceil((len(train_ds) * 3) / samples_per_optimizer_step))
+    logger.info(
+        "Token-PRM step budget: train_examples=%s samples_per_optimizer_step=%s full_run_steps=%s capped_max_steps=%s warmup_ratio=%.3f",
+        f"{len(train_ds):,}",
+        f"{samples_per_optimizer_step:,}",
+        f"{full_run_steps:,}",
+        f"{MAX_STEPS:,}",
+        WARMUP_RATIO,
+    )
 
     if wandb is not None and wandb.run is not None:
         wandb.run.summary["label_tokens/positive_text"] = label_tokens.positive_text
@@ -343,15 +321,19 @@ def main() -> None:
         wandb.run.summary["training/neg_loss_weight"] = NEG_LOSS_WEIGHT
         wandb.run.summary["training/focal_gamma"] = FOCAL_GAMMA
         wandb.run.summary["training/rebalance"] = "none"
+        wandb.run.summary["training/max_steps"] = MAX_STEPS
+        wandb.run.summary["training/warmup_ratio"] = WARMUP_RATIO
+        wandb.run.summary["training/full_run_steps_uncapped"] = full_run_steps
 
     training_args = TrainingArguments(
         output_dir=output_dir,
         num_train_epochs=3,
+        max_steps=MAX_STEPS,
         per_device_train_batch_size=PER_DEVICE_TRAIN_BATCH_SIZE,
         per_device_eval_batch_size=PER_DEVICE_EVAL_BATCH_SIZE,
         gradient_accumulation_steps=8,
         learning_rate=2e-6,
-        warmup_ratio=0.05,
+        warmup_ratio=WARMUP_RATIO,
         weight_decay=0.01,
         fp16=False,
         bf16=True,
