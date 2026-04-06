@@ -77,6 +77,7 @@ PER_DEVICE_EVAL_BATCH_SIZE = 4
 EVAL_ROW_FRACTION = 0.125
 NEG_LOSS_WEIGHT = 10.0
 FOCAL_GAMMA = 2.0
+DEBUG_EVAL_DUMP_ROWS_PER_CLASS = 3
 
 
 def training_mode_tag(freeze_base_model: bool) -> str:
@@ -168,6 +169,9 @@ def compute_metrics(eval_pred):
     neg_accuracy = float((pred_cls[neg_mask] == 1).mean()) if neg_mask.any() else 0.0
     balanced_accuracy = 0.5 * (pos_accuracy + neg_accuracy)
     pred_neg_fraction = float((pred_cls == 1).mean())
+    neg_prob_mean_pos = float(neg_probs[pos_mask].mean()) if pos_mask.any() else 0.0
+    neg_prob_mean_neg = float(neg_probs[neg_mask].mean()) if neg_mask.any() else 0.0
+    neg_prob_gap = float(neg_prob_mean_neg - neg_prob_mean_pos)
 
     neg_auroc = 0.5
     if pos_mask.any() and neg_mask.any():
@@ -200,12 +204,42 @@ def compute_metrics(eval_pred):
             best_balanced_accuracy = float(threshold_balanced_accuracy)
             best_balanced_accuracy_threshold = float(threshold)
 
+    debug_rows = []
+    for class_name, class_value, mask in (
+        ("pos", 0, pos_mask),
+        ("neg", 1, neg_mask),
+    ):
+        class_indices = np.flatnonzero(mask)[:DEBUG_EVAL_DUMP_ROWS_PER_CLASS]
+        for idx in class_indices:
+            debug_rows.append(
+                {
+                    "class": class_name,
+                    "true_cls": int(true_cls[idx]),
+                    "pred_cls": int(pred_cls[idx]),
+                    "pos_logit": float(pair_logits[idx][0]),
+                    "neg_logit": float(pair_logits[idx][1]),
+                    "neg_prob": float(neg_probs[idx]),
+                }
+            )
+    if debug_rows:
+        logger.info(
+            "Token-PRM eval debug: neg_prob_mean_pos=%.4f neg_prob_mean_neg=%.4f gap=%.4f pred_neg_fraction=%.4f rows=%s",
+            neg_prob_mean_pos,
+            neg_prob_mean_neg,
+            neg_prob_gap,
+            pred_neg_fraction,
+            debug_rows,
+        )
+
     return {
         "accuracy": accuracy,
         "pos_accuracy": pos_accuracy,
         "neg_accuracy": neg_accuracy,
         "balanced_accuracy": float(balanced_accuracy),
         "pred_neg_fraction": pred_neg_fraction,
+        "neg_prob_mean_pos": neg_prob_mean_pos,
+        "neg_prob_mean_neg": neg_prob_mean_neg,
+        "neg_prob_gap": neg_prob_gap,
         "neg_auroc": neg_auroc,
         "neg_average_precision": neg_average_precision,
         "best_balanced_accuracy": float(best_balanced_accuracy),
