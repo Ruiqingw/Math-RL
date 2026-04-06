@@ -332,7 +332,7 @@ def main() -> None:
         per_device_train_batch_size=PER_DEVICE_TRAIN_BATCH_SIZE,
         per_device_eval_batch_size=PER_DEVICE_EVAL_BATCH_SIZE,
         gradient_accumulation_steps=8,
-        learning_rate=2e-6,
+        learning_rate=5e-6,
         warmup_ratio=WARMUP_RATIO,
         weight_decay=0.01,
         fp16=False,
