@@ -15,7 +15,7 @@ from scripts.trl.rewards import VerifierShapingReward, math_boxed_reward
 DEFAULT_MODEL_PATH = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B"
 DEFAULT_DATA_DIR = "/root/autodl-tmp/prm_grpo/data/trl_math"
 DEFAULT_WANDB_PROJECT = "math_rl_trl"
-DEFAULT_VERIFIER_MODEL_PATH = "/root/autodl-tmp/prm_grpo/verifier_cls/checkpoint-6000"
+DEFAULT_VERIFIER_MODEL_PATH = "/root/autodl-tmp/prm_grpo/token_prm_runs/prm-token-fullft-phase2raw-nonneg-firsterr-eval12-negw10p0-focalg2p0-qwen25-math-1.5b/final"
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,10 +55,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--verifier-model-path", default=DEFAULT_VERIFIER_MODEL_PATH)
     parser.add_argument("--verifier-device", default="cuda")
     parser.add_argument("--verifier-max-length", type=int, default=1536)
-    parser.add_argument("--verifier-batch-size", type=int, default=1)
+    parser.add_argument("--verifier-batch-size", type=int, default=4)
     parser.add_argument("--verifier-beta", type=float, default=0.1)
     parser.add_argument("--verifier-delta", type=float, default=0.05)
-    parser.add_argument("--verifier-threshold", type=float, default=0.5)
+    parser.add_argument("--verifier-threshold", type=float, default=0.4)
     return parser.parse_args()
 
 

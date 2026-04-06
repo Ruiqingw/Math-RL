@@ -12,14 +12,20 @@ VERIFIER_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "verifier")
 if VERIFIER_DIR not in sys.path:
     sys.path.insert(0, VERIFIER_DIR)
 
-from reward_fn import PRMClassifier, score_steps  # noqa: E402
+from reward_fn import PRMClassifier, score_steps as score_steps_classifier  # noqa: E402
 from step_splitter import split_into_steps  # noqa: E402
+from token_reward_fn import (  # noqa: E402
+    load_model_bundle as load_token_prm_bundle,
+    score_steps as score_steps_token_prm,
+)
 
 
 _CACHED_VERIFIER: dict[str, Any] = {
     "key": None,
+    "backend": None,
     "model": None,
     "tokenizer": None,
+    "label_tokens": None,
 }
 
 
@@ -60,18 +66,37 @@ def _load_verifier(verifier_model_path: str, verifier_device: str):
 
     cache_key = f"{verifier_model_path}::{verifier_device}"
     if _CACHED_VERIFIER["key"] == cache_key:
-        return _CACHED_VERIFIER["model"], _CACHED_VERIFIER["tokenizer"]
+        return (
+            _CACHED_VERIFIER["backend"],
+            _CACHED_VERIFIER["model"],
+            _CACHED_VERIFIER["tokenizer"],
+            _CACHED_VERIFIER["label_tokens"],
+        )
 
-    tokenizer = AutoTokenizer.from_pretrained(verifier_model_path, trust_remote_code=True)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.truncation_side = "left"
+    cls_head_path = os.path.join(verifier_model_path, "cls_head.pt")
+    if os.path.exists(cls_head_path):
+        tokenizer = AutoTokenizer.from_pretrained(verifier_model_path, trust_remote_code=True)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.truncation_side = "left"
 
-    model = PRMClassifier.from_pretrained(verifier_model_path, device=verifier_device)
+        model = PRMClassifier.from_pretrained(verifier_model_path, device=verifier_device)
+        backend = "classifier"
+        label_tokens = None
+    else:
+        device_map = None if verifier_device == "cpu" else "auto"
+        model, tokenizer, label_tokens = load_token_prm_bundle(
+            verifier_model_path,
+            device_map=device_map,
+        )
+        backend = "token_prm"
+
     _CACHED_VERIFIER["key"] = cache_key
+    _CACHED_VERIFIER["backend"] = backend
     _CACHED_VERIFIER["model"] = model
     _CACHED_VERIFIER["tokenizer"] = tokenizer
-    return model, tokenizer
+    _CACHED_VERIFIER["label_tokens"] = label_tokens
+    return backend, model, tokenizer, label_tokens
 
 
 def verifier_shaping_reward(
@@ -87,7 +112,10 @@ def verifier_shaping_reward(
     verifier_threshold=0.5,
     **kwargs,
 ):
-    model, tokenizer = _load_verifier(verifier_model_path, verifier_device)
+    backend, model, tokenizer, label_tokens = _load_verifier(
+        verifier_model_path,
+        verifier_device,
+    )
     rewards = []
 
     for completion, problem_text in zip(completions, problem):
@@ -97,15 +125,27 @@ def verifier_shaping_reward(
             rewards.append(0.0)
             continue
 
-        step_scores = score_steps(
-            problem=problem_text,
-            steps=steps,
-            model=model,
-            tokenizer=tokenizer,
-            device=verifier_device,
-            max_length=verifier_max_length,
-            batch_size=verifier_batch_size,
-        )
+        if backend == "classifier":
+            step_scores = score_steps_classifier(
+                problem=problem_text,
+                steps=steps,
+                model=model,
+                tokenizer=tokenizer,
+                device=verifier_device,
+                max_length=verifier_max_length,
+                batch_size=verifier_batch_size,
+            )
+        else:
+            step_scores = score_steps_token_prm(
+                problem=problem_text,
+                steps=steps,
+                model=model,
+                tokenizer=tokenizer,
+                label_tokens=label_tokens,
+                device=verifier_device,
+                max_length=verifier_max_length,
+                batch_size=verifier_batch_size,
+            )
 
         # Center step scores around the verifier threshold so the average
         # contribution can be positive or negative instead of always positive.
