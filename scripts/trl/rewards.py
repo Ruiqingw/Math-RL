@@ -110,6 +110,7 @@ def verifier_shaping_reward(
     verifier_beta=0.1,
     verifier_delta=0.05,
     verifier_threshold=0.5,
+    gold_answer=None,
     **kwargs,
 ):
     backend, model, tokenizer, label_tokens = _load_verifier(
@@ -117,13 +118,22 @@ def verifier_shaping_reward(
         verifier_device,
     )
     rewards = []
+    if gold_answer is None:
+        gold_answer = [None] * len(completions)
 
-    for completion, problem_text in zip(completions, problem):
+    for completion, problem_text, answer in zip(completions, problem, gold_answer):
         completion_text = normalize_completion(completion)
         steps = split_into_steps(completion_text)
         if not steps or not problem_text:
             rewards.append(0.0)
             continue
+
+        base_correct = False
+        if answer is not None:
+            try:
+                base_correct = bool(compute_score(completion_text, ground_truth=answer))
+            except Exception:
+                base_correct = False
 
         if backend == "classifier":
             step_scores = score_steps_classifier(
@@ -156,7 +166,14 @@ def verifier_shaping_reward(
                 r_first_error = 1.0 - (idx / len(step_scores))
                 break
 
-        shaping = verifier_beta * r_avg_step - verifier_delta * r_first_error
+        # Conservative PRM usage:
+        # - Correct final answers keep the clean 0/1 boxed reward only.
+        # - Incorrect final answers receive an additional penalty based on
+        #   how early the verifier thinks the first error appears.
+        if base_correct:
+            shaping = 0.0
+        else:
+            shaping = -verifier_delta * r_first_error
         rewards.append(float(shaping))
 
     return rewards
