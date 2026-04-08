@@ -42,6 +42,7 @@ VERIFIER_BATCH_SIZE="${VERIFIER_BATCH_SIZE:-4}"
 VERIFIER_BETA="${VERIFIER_BETA:-0.3}"
 VERIFIER_DELTA="${VERIFIER_DELTA:-0.05}"
 VERIFIER_THRESHOLD="${VERIFIER_THRESHOLD:-0.4}"
+VERIFIER_TIEBREAK_ONLY="${VERIFIER_TIEBREAK_ONLY:-1}"
 
 cd "$PROJECT_ROOT"
 
@@ -74,6 +75,12 @@ ARGS=(
   --verifier-delta "$VERIFIER_DELTA"
   --verifier-threshold "$VERIFIER_THRESHOLD"
 )
+
+if [[ "$VERIFIER_TIEBREAK_ONLY" == "1" ]]; then
+  ARGS+=(--verifier-tiebreak-only)
+else
+  ARGS+=(--no-verifier-tiebreak-only)
+fi
 
 if [[ "$USE_VLLM" == "1" ]]; then
   ARGS+=(--use-vllm --vllm-mode "$VLLM_MODE" --vllm-gpu-memory-utilization "$VLLM_GPU_MEMORY_UTILIZATION")

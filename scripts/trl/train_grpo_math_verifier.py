@@ -60,6 +60,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--verifier-beta", type=float, default=0.3)
     parser.add_argument("--verifier-delta", type=float, default=0.05)
     parser.add_argument("--verifier-threshold", type=float, default=0.4)
+    parser.add_argument("--verifier-tiebreak-only", action="store_true", default=True)
+    parser.add_argument("--no-verifier-tiebreak-only", dest="verifier_tiebreak_only", action="store_false")
     return parser.parse_args()
 
 
@@ -120,6 +122,10 @@ def main() -> None:
         vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
         seed=args.seed,
     )
+    training_args.aux_reward_only_when_base_zero_variance = args.verifier_tiebreak_only
+    training_args.aux_reward_base_name = "math_boxed_reward"
+    training_args.aux_reward_name = "verifier_shaping_reward"
+    training_args.aux_reward_all_zero_only = True
 
     shaping_reward = VerifierShapingReward(
         verifier_model_path=args.verifier_model_path,
