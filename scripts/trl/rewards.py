@@ -122,6 +122,7 @@ def verifier_shaping_reward(
         verifier_model_path,
         verifier_device,
     )
+    log_metric = kwargs.get("log_metric")
     rewards = []
     base_correct_flags = []
     if gold_answer is None:
@@ -184,8 +185,11 @@ def verifier_shaping_reward(
         rewards.append(float(shaping))
         base_correct_flags.append(base_correct)
 
-    if verifier_tiebreak_only and rewards:
+    if rewards:
         gated_rewards = rewards[:]
+        total_groups = 0
+        all_wrong_groups = 0
+        active_tiebreak_groups = 0
         start = 0
         while start < len(gated_rewards):
             group_id = _group_key(prompts[start], problem[start], gold_answer[start])
@@ -193,15 +197,32 @@ def verifier_shaping_reward(
             while end < len(gated_rewards) and _group_key(prompts[end], problem[end], gold_answer[end]) == group_id:
                 end += 1
 
-            # Only let the verifier break ties when every sampled completion
-            # for this prompt is still wrong under the main answer-level reward.
+            total_groups += 1
             group_has_tie = end - start > 1
             group_all_wrong = not any(base_correct_flags[start:end])
-            if not (group_has_tie and group_all_wrong):
-                for idx in range(start, end):
-                    gated_rewards[idx] = 0.0
+            if group_all_wrong:
+                all_wrong_groups += 1
+            if verifier_tiebreak_only:
+                # Only let the verifier break ties when every sampled completion
+                # for this prompt is still wrong under the main answer-level reward.
+                if group_has_tie and group_all_wrong:
+                    active_tiebreak_groups += 1
+                else:
+                    for idx in range(start, end):
+                        gated_rewards[idx] = 0.0
             start = end
-        rewards = gated_rewards
+
+        if log_metric is not None and total_groups > 0:
+            log_metric("math_boxed_reward/all_wrong_group_count", float(all_wrong_groups))
+            log_metric("math_boxed_reward/all_wrong_group_frac", float(all_wrong_groups / total_groups))
+            if verifier_tiebreak_only:
+                log_metric("verifier_shaping_reward/gate_active_group_count", float(active_tiebreak_groups))
+                log_metric(
+                    "verifier_shaping_reward/gate_active_group_frac",
+                    float(active_tiebreak_groups / total_groups),
+                )
+        if verifier_tiebreak_only:
+            rewards = gated_rewards
 
     return rewards
 
