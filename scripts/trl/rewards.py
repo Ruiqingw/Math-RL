@@ -53,6 +53,10 @@ def normalize_completion(completion: Any) -> str:
     return str(completion)
 
 
+def _group_key(prompt: Any, problem_text: Any, answer: Any) -> tuple[str, str, str]:
+    return (str(prompt), str(problem_text), str(answer))
+
+
 def math_boxed_reward(prompts, completions, gold_answer, **kwargs):
     rewards = []
     for completion, answer in zip(completions, gold_answer):
@@ -110,6 +114,7 @@ def verifier_shaping_reward(
     verifier_beta=0.1,
     verifier_delta=0.05,
     verifier_threshold=0.5,
+    verifier_tiebreak_only=False,
     gold_answer=None,
     **kwargs,
 ):
@@ -118,14 +123,16 @@ def verifier_shaping_reward(
         verifier_device,
     )
     rewards = []
+    base_correct_flags = []
     if gold_answer is None:
         gold_answer = [None] * len(completions)
 
-    for completion, problem_text, answer in zip(completions, problem, gold_answer):
+    for prompt, completion, problem_text, answer in zip(prompts, completions, problem, gold_answer):
         completion_text = normalize_completion(completion)
         steps = split_into_steps(completion_text)
         if not steps or not problem_text:
             rewards.append(0.0)
+            base_correct_flags.append(False)
             continue
 
         base_correct = False
@@ -175,6 +182,26 @@ def verifier_shaping_reward(
         else:
             shaping = -verifier_delta * r_first_error
         rewards.append(float(shaping))
+        base_correct_flags.append(base_correct)
+
+    if verifier_tiebreak_only and rewards:
+        gated_rewards = rewards[:]
+        start = 0
+        while start < len(gated_rewards):
+            group_id = _group_key(prompts[start], problem[start], gold_answer[start])
+            end = start + 1
+            while end < len(gated_rewards) and _group_key(prompts[end], problem[end], gold_answer[end]) == group_id:
+                end += 1
+
+            # Only let the verifier break ties when every sampled completion
+            # for this prompt is still wrong under the main answer-level reward.
+            group_has_tie = end - start > 1
+            group_all_wrong = not any(base_correct_flags[start:end])
+            if not (group_has_tie and group_all_wrong):
+                for idx in range(start, end):
+                    gated_rewards[idx] = 0.0
+            start = end
+        rewards = gated_rewards
 
     return rewards
 
@@ -197,6 +224,7 @@ class VerifierShapingReward:
         verifier_beta: float = 0.1,
         verifier_delta: float = 0.05,
         verifier_threshold: float = 0.5,
+        verifier_tiebreak_only: bool = False,
     ):
         self.verifier_model_path = verifier_model_path
         self.verifier_device = verifier_device
@@ -205,6 +233,7 @@ class VerifierShapingReward:
         self.verifier_beta = verifier_beta
         self.verifier_delta = verifier_delta
         self.verifier_threshold = verifier_threshold
+        self.verifier_tiebreak_only = verifier_tiebreak_only
         self.__name__ = "verifier_shaping_reward"
 
     def __call__(self, prompts, completions, problem, **kwargs):
@@ -219,6 +248,7 @@ class VerifierShapingReward:
             verifier_beta=self.verifier_beta,
             verifier_delta=self.verifier_delta,
             verifier_threshold=self.verifier_threshold,
+            verifier_tiebreak_only=self.verifier_tiebreak_only,
             **kwargs,
         )
 

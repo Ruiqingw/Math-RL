@@ -135,6 +135,7 @@ def main() -> None:
         verifier_beta=args.verifier_beta,
         verifier_delta=args.verifier_delta,
         verifier_threshold=args.verifier_threshold,
+        verifier_tiebreak_only=args.verifier_tiebreak_only,
     )
 
     # Two separate reward functions so TRL logs each independently:
