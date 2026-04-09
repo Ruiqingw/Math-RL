@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-generations", type=int, default=4)
     parser.add_argument("--num-generations-eval", type=int, default=1)
     parser.add_argument("--learning-rate", type=float, default=3e-5)
-    parser.add_argument("--beta", type=float, default=0.001)
+    parser.add_argument("--beta", type=float, default=0.0)
     parser.add_argument("--num-train-epochs", type=float, default=1.0)
     parser.add_argument("--logging-steps", type=int, default=1)
     parser.add_argument("--eval-steps", type=int, default=20)
