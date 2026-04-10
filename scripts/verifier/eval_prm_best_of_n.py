@@ -29,6 +29,8 @@ from tqdm import tqdm
 from verl.utils.reward_score.math_reward import compute_score, last_boxed_only_string, remove_boxed
 
 
+os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
+
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
