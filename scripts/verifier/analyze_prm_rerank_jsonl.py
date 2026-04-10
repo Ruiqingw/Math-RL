@@ -85,6 +85,9 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
     best_correct_ranks: list[int] = []
     selected_wrong_more_steps = 0
     selected_wrong_longer = 0
+    pairwise_wins = 0.0
+    pairwise_total = 0
+    per_problem_pairwise: list[float] = []
     misranking_cases: list[dict[str, Any]] = []
     correct_available = 0
 
@@ -116,6 +119,20 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         if not correct_candidates:
             continue
         correct_available += 1
+        wrong_candidates = [sample for sample in sampled if not candidate_correct(sample)]
+
+        if wrong_candidates:
+            row_wins = 0.0
+            row_total = 0
+            for correct in correct_candidates:
+                correct_score = candidate_score(correct)
+                for wrong in wrong_candidates:
+                    wrong_score = candidate_score(wrong)
+                    row_wins += float(correct_score > wrong_score) + 0.5 * float(correct_score == wrong_score)
+                    row_total += 1
+            pairwise_wins += row_wins
+            pairwise_total += row_total
+            per_problem_pairwise.append(row_wins / row_total if row_total else 0.0)
 
         sorted_indices = sorted(range(len(sampled)), key=lambda idx: candidate_score(sampled[idx]), reverse=True)
         correct_indices = {idx for idx, sample in enumerate(sampled) if candidate_correct(sample)}
@@ -173,6 +190,14 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         "selected_correct_score_mean": safe_mean(selected_correct_scores),
         "selected_wrong_score_mean": safe_mean(selected_wrong_scores),
         "best_correct_rank_mean": safe_mean([float(rank) for rank in best_correct_ranks]),
+        "within_problem_correct_beats_wrong": pairwise_wins / pairwise_total if pairwise_total else float("nan"),
+        "within_problem_correct_beats_wrong_mean_by_problem": safe_mean(per_problem_pairwise),
+        "within_problem_pairwise_problem_count": len(per_problem_pairwise),
+        "within_problem_pairwise_below_random_frac": (
+            sum(1 for value in per_problem_pairwise if value < 0.5) / len(per_problem_pairwise)
+            if per_problem_pairwise
+            else float("nan")
+        ),
         "selected_wrong_more_steps_frac": (
             selected_wrong_more_steps / len(misranking_cases) if misranking_cases else 0.0
         ),
@@ -201,6 +226,16 @@ def print_report(result: dict[str, Any], case_limit: int, snippet_chars: int) ->
     print(f"selected_correct_score_mean          : {fmt(result['selected_correct_score_mean'])}")
     print(f"selected_wrong_score_mean            : {fmt(result['selected_wrong_score_mean'])}")
     print(f"best_correct_rank_mean               : {fmt(result['best_correct_rank_mean'])}")
+    print(f"within_problem_correct_beats_wrong   : {fmt(result['within_problem_correct_beats_wrong'])}")
+    print(
+        "within_problem_correct_beats_wrong_mean_by_problem: "
+        f"{fmt(result['within_problem_correct_beats_wrong_mean_by_problem'])}"
+    )
+    print(f"within_problem_pairwise_problem_count: {result['within_problem_pairwise_problem_count']}")
+    print(
+        "within_problem_pairwise_below_random_frac: "
+        f"{fmt(result['within_problem_pairwise_below_random_frac'])}"
+    )
     print(f"selected_wrong_more_steps_frac       : {fmt(result['selected_wrong_more_steps_frac'])}")
     print(f"selected_wrong_longer_frac           : {fmt(result['selected_wrong_longer_frac'])}")
 
