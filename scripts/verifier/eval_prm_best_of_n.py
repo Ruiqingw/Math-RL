@@ -6,7 +6,7 @@ This compares three base-model inference strategies on the same prompts:
 
 1. Greedy decoding at T=0.
 2. Majority voting over N sampled completions at T=0.8.
-3. PRM best-of-N: score the same N sampled completions with a token PRM and
+3. PRM best-of-N: score the same N sampled completions with a verifier/PRM and
    take the highest-scoring completion.
 """
 
@@ -36,7 +36,11 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 from step_splitter import split_into_steps  # noqa: E402
-from token_reward_fn import load_model_bundle, score_steps  # noqa: E402
+from reward_fn import PRMClassifier, score_steps as score_steps_classifier  # noqa: E402
+from token_reward_fn import (  # noqa: E402
+    load_model_bundle as load_token_prm_bundle,
+    score_steps as score_steps_token_prm,
+)
 
 
 DEFAULT_MODEL_PATH = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B"
@@ -62,6 +66,14 @@ class EvalExample:
     solution: str
 
 
+@dataclass
+class PRMBundle:
+    backend: str
+    model: Any
+    tokenizer: Any
+    label_tokens: Any = None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compare base greedy, majority vote, and token-PRM best-of-N on MATH."
@@ -70,7 +82,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--verifier-model-path",
         default=DEFAULT_VERIFIER_MODEL_PATH,
-        help="Token PRM checkpoint path.",
+        help="Verifier checkpoint path. Supports token PRM and classifier-head PRM checkpoints.",
+    )
+    parser.add_argument(
+        "--verifier-backend",
+        default="auto",
+        choices=["auto", "token_prm", "classifier"],
+        help="Verifier backend. auto uses classifier when cls_head.pt exists, otherwise token_prm.",
     )
     parser.add_argument(
         "--data-dir",
@@ -249,16 +267,70 @@ def aggregate_step_scores(step_scores: list[float], mode: str) -> float:
     raise ValueError(f"Unsupported PRM aggregation: {mode}")
 
 
+def load_prm_bundle(args: argparse.Namespace) -> PRMBundle:
+    cls_head_path = os.path.join(args.verifier_model_path, "cls_head.pt")
+    backend = args.verifier_backend
+    if backend == "auto":
+        backend = "classifier" if os.path.exists(cls_head_path) else "token_prm"
+
+    if backend == "classifier":
+        from transformers import AutoTokenizer
+
+        if not os.path.exists(cls_head_path):
+            raise FileNotFoundError(
+                f"Classification-head verifier selected, but cls_head.pt was not found: {cls_head_path}"
+            )
+        tokenizer = AutoTokenizer.from_pretrained(args.verifier_model_path, trust_remote_code=True)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.truncation_side = "left"
+        model = PRMClassifier.from_pretrained(args.verifier_model_path, device=args.verifier_device)
+        return PRMBundle(backend=backend, model=model, tokenizer=tokenizer)
+
+    device_map = None if args.verifier_device == "cpu" else "auto"
+    model, tokenizer, label_tokens = load_token_prm_bundle(
+        args.verifier_model_path,
+        device_map=device_map,
+    )
+    return PRMBundle(backend=backend, model=model, tokenizer=tokenizer, label_tokens=label_tokens)
+
+
+def score_steps_with_prm(
+    problem: str,
+    steps: list[str],
+    bundle: PRMBundle,
+    args: argparse.Namespace,
+) -> list[float]:
+    if bundle.backend == "classifier":
+        return score_steps_classifier(
+            problem,
+            steps,
+            bundle.model,
+            bundle.tokenizer,
+            device=args.verifier_device,
+            max_length=args.verifier_max_length,
+            batch_size=args.verifier_batch_size,
+        )
+
+    return score_steps_token_prm(
+        problem,
+        steps,
+        bundle.model,
+        bundle.tokenizer,
+        bundle.label_tokens,
+        device=args.verifier_device,
+        max_length=args.verifier_max_length,
+        batch_size=args.verifier_batch_size,
+    )
+
+
 def score_completions_with_prm(
     examples: list[EvalExample],
     sampled_completions: list[list[str]],
     args: argparse.Namespace,
 ) -> list[list[dict[str, Any]]]:
-    device_map = None if args.verifier_device == "cpu" else "auto"
-    model, tokenizer, label_tokens = load_model_bundle(
-        args.verifier_model_path,
-        device_map=device_map,
-    )
+    bundle = load_prm_bundle(args)
+    print(f"verifier_backend : {bundle.backend}")
 
     all_scores: list[list[dict[str, Any]]] = []
     iterator = zip(examples, sampled_completions)
@@ -266,15 +338,11 @@ def score_completions_with_prm(
         group_scores: list[dict[str, Any]] = []
         for text in completion_group:
             steps = split_into_steps(text)
-            step_scores = score_steps(
+            step_scores = score_steps_with_prm(
                 example.problem,
                 steps,
-                model,
-                tokenizer,
-                label_tokens,
-                device=args.verifier_device,
-                max_length=args.verifier_max_length,
-                batch_size=args.verifier_batch_size,
+                bundle,
+                args,
             )
             group_scores.append(
                 {
