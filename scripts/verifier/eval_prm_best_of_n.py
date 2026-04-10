@@ -125,6 +125,11 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_INSTRUCTION,
         help="Instruction suffix if the parquet row has no prebuilt prompt.",
     )
+    parser.add_argument(
+        "--reuse-generations-jsonl",
+        default="",
+        help="Optional JSONL from a previous run. Reuse its greedy/sample completions and only rerun PRM scoring.",
+    )
     parser.add_argument("--output-jsonl", default=DEFAULT_OUTPUT_JSONL, help="Per-problem output path.")
     return parser.parse_args()
 
@@ -174,6 +179,33 @@ def load_examples(args: argparse.Namespace) -> list[EvalExample]:
             )
         )
     return examples
+
+
+def load_reused_generations(path: str, max_samples: int | None) -> tuple[list[EvalExample], list[str], list[list[str]]]:
+    examples: list[EvalExample] = []
+    greedy_texts: list[str] = []
+    sampled_completions: list[list[str]] = []
+
+    with open(path, "r", encoding="utf-8") as reader:
+        for line_idx, line in enumerate(reader):
+            if max_samples is not None and line_idx >= max_samples:
+                break
+            row = json.loads(line)
+            examples.append(
+                EvalExample(
+                    idx=int(row.get("dataset_idx", line_idx)),
+                    prompt=str(row.get("prompt", "")),
+                    problem=str(row.get("problem", "")),
+                    gold_answer=str(row.get("gold_answer", "")),
+                    solution=str(row.get("gold_solution", "")),
+                )
+            )
+            greedy_texts.append(str(row.get("greedy_text", "")))
+            sampled_completions.append([str(sample.get("text", "")) for sample in row.get("sampled", [])])
+
+    if not examples:
+        raise ValueError(f"No reusable generation records found in: {path}")
+    return examples, greedy_texts, sampled_completions
 
 
 def make_sampling_params(
@@ -363,7 +395,18 @@ def best_index(scores: list[dict[str, Any]]) -> int:
 
 def main() -> None:
     args = parse_args()
-    examples = load_examples(args)
+    reusing_generations = bool(args.reuse_generations_jsonl)
+    if reusing_generations and os.path.abspath(args.reuse_generations_jsonl) == os.path.abspath(args.output_jsonl):
+        raise ValueError("--output-jsonl must be different from --reuse-generations-jsonl to avoid overwriting inputs.")
+
+    if reusing_generations:
+        examples, greedy_texts, sampled_completions = load_reused_generations(
+            args.reuse_generations_jsonl,
+            args.max_samples,
+        )
+    else:
+        examples = load_examples(args)
+
     if not examples:
         raise ValueError("No evaluation examples loaded.")
 
@@ -382,30 +425,33 @@ def main() -> None:
     print(f"num_generations  : {args.num_generations}")
     print(f"sample_temperature: {args.sample_temperature}")
     print(f"prm_aggregation  : {args.prm_aggregation}")
+    if reusing_generations:
+        print(f"reuse_generations: {args.reuse_generations_jsonl}")
 
-    llm = load_vllm_model(args.model_path, args.dtype, args.vllm_gpu_memory_utilization)
-    greedy_params = make_sampling_params(
-        temperature=args.greedy_temperature,
-        top_p=1.0,
-        max_new_tokens=args.max_new_tokens,
-        n=1,
-        seed=args.seed,
-    )
-    sample_params = make_sampling_params(
-        temperature=args.sample_temperature,
-        top_p=args.sample_top_p,
-        max_new_tokens=args.max_new_tokens,
-        n=args.num_generations,
-        seed=args.seed,
-    )
+    if not reusing_generations:
+        llm = load_vllm_model(args.model_path, args.dtype, args.vllm_gpu_memory_utilization)
+        greedy_params = make_sampling_params(
+            temperature=args.greedy_temperature,
+            top_p=1.0,
+            max_new_tokens=args.max_new_tokens,
+            n=1,
+            seed=args.seed,
+        )
+        sample_params = make_sampling_params(
+            temperature=args.sample_temperature,
+            top_p=args.sample_top_p,
+            max_new_tokens=args.max_new_tokens,
+            n=args.num_generations,
+            seed=args.seed,
+        )
 
-    print("\nGenerating greedy completions...")
-    greedy_completions = generate_batches(llm, prompts, greedy_params, args.generation_batch_size)
-    greedy_texts = [group[0] if group else "" for group in greedy_completions]
+        print("\nGenerating greedy completions...")
+        greedy_completions = generate_batches(llm, prompts, greedy_params, args.generation_batch_size)
+        greedy_texts = [group[0] if group else "" for group in greedy_completions]
 
-    print("\nGenerating sampled completions...")
-    sampled_completions = generate_batches(llm, prompts, sample_params, args.generation_batch_size)
-    release_generation_model(llm)
+        print("\nGenerating sampled completions...")
+        sampled_completions = generate_batches(llm, prompts, sample_params, args.generation_batch_size)
+        release_generation_model(llm)
 
     print("\nScoring sampled completions with PRM...")
     prm_scores = score_completions_with_prm(examples, sampled_completions, args)
@@ -480,7 +526,9 @@ def main() -> None:
     majority_acc = sum(majority_correct) / n
     prm_best_acc = sum(prm_best_correct) / n
     oracle_acc = sum(oracle_correct) / n
-    boxed_rate = sum(boxed_counts) / (n * args.num_generations)
+    sample_total = sum(len(group) for group in sampled_completions)
+    effective_num_generations = round(sample_total / n) if n else args.num_generations
+    boxed_rate = sum(boxed_counts) / sample_total if sample_total else 0.0
 
     print("\n" + "=" * 80)
     print("Summary")
@@ -488,7 +536,7 @@ def main() -> None:
     print(f"num_examples              : {n}")
     print(f"greedy_accuracy           : {greedy_acc:.4f}")
     print(f"majority_vote_accuracy    : {majority_acc:.4f}")
-    print(f"prm_best_of_{args.num_generations}_accuracy : {prm_best_acc:.4f}")
+    print(f"prm_best_of_{effective_num_generations}_accuracy : {prm_best_acc:.4f}")
     print(f"sample_oracle_accuracy    : {oracle_acc:.4f}")
     print(f"sample_boxed_rate         : {boxed_rate:.4f}")
     print(f"output_jsonl              : {args.output_jsonl}")
