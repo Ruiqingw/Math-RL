@@ -125,6 +125,8 @@ def verifier_shaping_reward(
     log_metric = kwargs.get("log_metric")
     rewards = []
     base_correct_flags = []
+    min_step_scores = []
+    min_penalties = []
     if gold_answer is None:
         gold_answer = [None] * len(completions)
 
@@ -165,23 +167,22 @@ def verifier_shaping_reward(
                 batch_size=verifier_batch_size,
             )
 
-        # Center step scores around the verifier threshold so the average
-        # contribution can be positive or negative instead of always positive.
-        r_avg_step = sum(score - verifier_threshold for score in step_scores) / len(step_scores)
-        r_first_error = 0.0
-        for idx, score in enumerate(step_scores):
-            if score < verifier_threshold:
-                r_first_error = 1.0 - (idx / len(step_scores))
-                break
+        # Use a weakest-link signal. Offline best-of-N diagnostics showed that
+        # min aggregation preserves PRM usefulness better than averaging, which
+        # can dilute a single bad step across many fluent-looking steps.
+        min_step_score = min(step_scores)
+        min_centered_score = min_step_score - verifier_threshold
+        min_penalty = max(verifier_threshold - min_step_score, 0.0)
+        min_step_scores.append(float(min_step_score))
+        min_penalties.append(float(min_penalty))
 
         # Conservative PRM usage:
         # - Correct final answers keep the clean 0/1 boxed reward only.
-        # - Incorrect final answers receive an additional penalty based on
-        #   how early the verifier thinks the first error appears.
+        # - Incorrect final answers receive only a non-positive min-step penalty.
         if base_correct:
             shaping = 0.0
         else:
-            shaping = -verifier_delta * r_first_error
+            shaping = verifier_beta * min(min_centered_score, 0.0)
         rewards.append(float(shaping))
         base_correct_flags.append(base_correct)
 
@@ -215,6 +216,15 @@ def verifier_shaping_reward(
         if log_metric is not None and total_groups > 0:
             log_metric("math_boxed_reward/all_wrong_group_count", float(all_wrong_groups))
             log_metric("math_boxed_reward/all_wrong_group_frac", float(all_wrong_groups / total_groups))
+            if min_step_scores:
+                log_metric(
+                    "verifier_shaping_reward/min_step_score_mean",
+                    float(sum(min_step_scores) / len(min_step_scores)),
+                )
+                log_metric(
+                    "verifier_shaping_reward/min_penalty_mean",
+                    float(sum(min_penalties) / len(min_penalties)),
+                )
             if verifier_tiebreak_only:
                 log_metric("verifier_shaping_reward/gate_active_group_count", float(active_tiebreak_groups))
                 log_metric(
