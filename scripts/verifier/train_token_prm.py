@@ -3,7 +3,7 @@
 Train an OpenAI-style token-prediction PRM.
 
 Current default data path:
-- raw OpenAI PRM800K phase 2
+- raw OpenAI PRM800K phase 1 + phase 2
 - reconstructed chosen trajectories
 - first-error-only truncation
 - rating >= 0 treated as non-error
@@ -40,7 +40,9 @@ from token_prm import (
 )
 from openai_prm_raw import (
     DEFAULT_RAW_DATA_DIR,
+    build_raw_phase1_phase2_dataset,
     build_raw_phase2_dataset,
+    phase1_phase2_cache_dir,
     phase2_cache_dir,
 )
 
@@ -65,7 +67,7 @@ logger = logging.getLogger(__name__)
 
 MODEL_NAME = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B"
 OUTPUT_ROOT = "/root/autodl-tmp/prm_grpo/token_prm_runs"
-DATASET_SOURCE = "raw_phase2"
+DATASET_SOURCE = "raw_phase1_phase2"
 RAW_DATA_DIR = DEFAULT_RAW_DATA_DIR
 RAW_NEUTRAL_POLICY = "nonnegative"
 MAX_LENGTH = 1536
@@ -95,6 +97,10 @@ def dataset_tag(
         neutral_tag = "nonneg" if neutral_policy == "nonnegative" else "posonly"
         prefix_tag = "firsterr" if stop_at_first_negative else "allsteps"
         return f"phase2raw-{neutral_tag}-{prefix_tag}"
+    if dataset_source == "raw_phase1_phase2":
+        neutral_tag = "nonneg" if neutral_policy == "nonnegative" else "posonly"
+        prefix_tag = "firsterr" if stop_at_first_negative else "allsteps"
+        return f"phase1phase2raw-{neutral_tag}-{prefix_tag}"
     raise ValueError(f"Unknown dataset source: {dataset_source}")
 
 
@@ -228,6 +234,22 @@ def load_training_dataset():
             STOP_AT_FIRST_NEGATIVE,
         )
         return build_raw_phase2_dataset(
+            raw_data_dir=RAW_DATA_DIR,
+            neutral_policy=RAW_NEUTRAL_POLICY,
+            stop_at_first_negative=STOP_AT_FIRST_NEGATIVE,
+        )
+    if DATASET_SOURCE == "raw_phase1_phase2":
+        logger.info(
+            "Loading token-PRM dataset from raw OpenAI PRM800K phase1+phase2: raw_dir=%s cache_dir=%s neutral_policy=%s stop_at_first_negative=%s",
+            RAW_DATA_DIR,
+            phase1_phase2_cache_dir(
+                neutral_policy=RAW_NEUTRAL_POLICY,
+                stop_at_first_negative=STOP_AT_FIRST_NEGATIVE,
+            ),
+            RAW_NEUTRAL_POLICY,
+            STOP_AT_FIRST_NEGATIVE,
+        )
+        return build_raw_phase1_phase2_dataset(
             raw_data_dir=RAW_DATA_DIR,
             neutral_policy=RAW_NEUTRAL_POLICY,
             stop_at_first_negative=STOP_AT_FIRST_NEGATIVE,

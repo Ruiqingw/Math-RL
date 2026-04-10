@@ -28,7 +28,9 @@ from token_prm import (
 )
 from openai_prm_raw import (
     DEFAULT_RAW_DATA_DIR,
+    build_raw_phase1_phase2_dataset,
     build_raw_phase2_dataset,
+    phase1_phase2_cache_dir,
     phase2_cache_dir,
 )
 
@@ -41,8 +43,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-path", required=True, help="Checkpoint directory.")
     parser.add_argument(
         "--dataset-source",
-        default="raw_phase2",
-        choices=["raw_phase2"],
+        default="raw_phase1_phase2",
+        choices=["raw_phase2", "raw_phase1_phase2"],
         help="Which dataset view to evaluate on.",
     )
     parser.add_argument("--raw-data-dir", default=DEFAULT_RAW_DATA_DIR)
@@ -86,19 +88,30 @@ def load_eval_dataset(
     max_length: int,
     all_steps: bool,
 ):
-    if dataset_source != "raw_phase2":
+    if dataset_source == "raw_phase2":
+        effective_cache_dir = cache_dir or phase2_cache_dir(
+            neutral_policy=neutral_policy,
+            stop_at_first_negative=not all_steps,
+        )
+        dataset = build_raw_phase2_dataset(
+            raw_data_dir=raw_data_dir,
+            cache_dir=effective_cache_dir,
+            neutral_policy=neutral_policy,
+            stop_at_first_negative=not all_steps,
+        )
+    elif dataset_source == "raw_phase1_phase2":
+        effective_cache_dir = cache_dir or phase1_phase2_cache_dir(
+            neutral_policy=neutral_policy,
+            stop_at_first_negative=not all_steps,
+        )
+        dataset = build_raw_phase1_phase2_dataset(
+            raw_data_dir=raw_data_dir,
+            cache_dir=effective_cache_dir,
+            neutral_policy=neutral_policy,
+            stop_at_first_negative=not all_steps,
+        )
+    else:
         raise ValueError(f"Unsupported dataset source: {dataset_source}")
-
-    effective_cache_dir = cache_dir or phase2_cache_dir(
-        neutral_policy=neutral_policy,
-        stop_at_first_negative=not all_steps,
-    )
-    dataset = build_raw_phase2_dataset(
-        raw_data_dir=raw_data_dir,
-        cache_dir=effective_cache_dir,
-        neutral_policy=neutral_policy,
-        stop_at_first_negative=not all_steps,
-    )
     hf_split = dataset[split]
     return TokenPRMDataset(
         hf_split,

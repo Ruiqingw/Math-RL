@@ -21,14 +21,45 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-from datasets import DatasetDict, load_dataset, load_from_disk
+from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 
 
 DEFAULT_RAW_DATA_DIR = "/root/autodl-tmp/prm_grpo/prm800k_raw/prm800k/data"
 DEFAULT_CACHE_ROOT = "/root/autodl-tmp/prm_grpo/datasets"
 
 
+def raw_phase_cache_dir(
+    *,
+    phase: str,
+    cache_root: str = DEFAULT_CACHE_ROOT,
+    neutral_policy: str = "nonnegative",
+    stop_at_first_negative: bool = True,
+) -> str:
+    if phase not in {"phase1", "phase2"}:
+        raise ValueError(f"Unsupported raw PRM800K phase: {phase}")
+    neutral_tag = "nonneg" if neutral_policy == "nonnegative" else "posonly"
+    prefix_tag = "firsterr" if stop_at_first_negative else "allsteps"
+    return os.path.join(
+        cache_root,
+        f"prm800k_openai_{phase}_stepwise_{neutral_tag}_{prefix_tag}",
+    )
+
+
 def phase2_cache_dir(
+    *,
+    cache_root: str = DEFAULT_CACHE_ROOT,
+    neutral_policy: str = "nonnegative",
+    stop_at_first_negative: bool = True,
+) -> str:
+    return raw_phase_cache_dir(
+        phase="phase2",
+        cache_root=cache_root,
+        neutral_policy=neutral_policy,
+        stop_at_first_negative=stop_at_first_negative,
+    )
+
+
+def phase1_phase2_cache_dir(
     *,
     cache_root: str = DEFAULT_CACHE_ROOT,
     neutral_policy: str = "nonnegative",
@@ -38,7 +69,7 @@ def phase2_cache_dir(
     prefix_tag = "firsterr" if stop_at_first_negative else "allsteps"
     return os.path.join(
         cache_root,
-        f"prm800k_openai_phase2_stepwise_{neutral_tag}_{prefix_tag}",
+        f"prm800k_openai_phase1_phase2_stepwise_{neutral_tag}_{prefix_tag}",
     )
 
 
@@ -94,7 +125,7 @@ def _truncate_row(
     }
 
 
-def process_phase2_example_rows(
+def process_raw_prm_example_rows(
     example: Dict[str, Any],
     *,
     neutral_policy: str = "nonnegative",
@@ -192,7 +223,7 @@ def process_phase2_example_rows(
     return outputs
 
 
-def process_phase2_batch(
+def process_raw_prm_batch(
     examples: Dict[str, List[Any]],
     *,
     neutral_policy: str = "nonnegative",
@@ -203,7 +234,7 @@ def process_phase2_batch(
 
     for idx in range(batch_size):
         example = {key: value[idx] for key, value in examples.items()}
-        rows = process_phase2_example_rows(
+        rows = process_raw_prm_example_rows(
             example,
             neutral_policy=neutral_policy,
             stop_at_first_negative=stop_at_first_negative,
@@ -216,16 +247,21 @@ def process_phase2_batch(
     return {key: [row[key] for row in outputs] for key in ("prompt", "completions", "labels")}
 
 
-def build_raw_phase2_dataset(
+def build_raw_phase_dataset(
     *,
     raw_data_dir: str = DEFAULT_RAW_DATA_DIR,
+    phase: str,
     cache_dir: Optional[str] = None,
     force_rebuild: bool = False,
     neutral_policy: str = "nonnegative",
     stop_at_first_negative: bool = True,
 ) -> DatasetDict:
+    if phase not in {"phase1", "phase2"}:
+        raise ValueError(f"Unsupported raw PRM800K phase: {phase}")
+
     if cache_dir is None:
-        cache_dir = phase2_cache_dir(
+        cache_dir = raw_phase_cache_dir(
+            phase=phase,
             neutral_policy=neutral_policy,
             stop_at_first_negative=stop_at_first_negative,
         )
@@ -234,20 +270,20 @@ def build_raw_phase2_dataset(
         return load_from_disk(cache_dir)
 
     data_files = {
-        "train": os.path.join(raw_data_dir, "phase2_train.jsonl"),
-        "test": os.path.join(raw_data_dir, "phase2_test.jsonl"),
+        "train": os.path.join(raw_data_dir, f"{phase}_train.jsonl"),
+        "test": os.path.join(raw_data_dir, f"{phase}_test.jsonl"),
     }
     for split_name, path in data_files.items():
         if not os.path.exists(path):
             raise FileNotFoundError(
-                f"Missing raw PRM800K {split_name} split: {path}\n"
+                f"Missing raw PRM800K {phase} {split_name} split: {path}\n"
                 "Expected a clone of https://github.com/openai/prm800k under "
                 f"{os.path.dirname(os.path.dirname(raw_data_dir))}"
             )
 
     raw_dataset = load_dataset("json", data_files=data_files)
     processed = raw_dataset.map(
-        lambda batch: process_phase2_batch(
+        lambda batch: process_raw_prm_batch(
             batch,
             neutral_policy=neutral_policy,
             stop_at_first_negative=stop_at_first_negative,
@@ -255,7 +291,7 @@ def build_raw_phase2_dataset(
         batched=True,
         batch_size=16,
         remove_columns=raw_dataset["train"].column_names,
-        desc="Processing raw OpenAI PRM800K phase2",
+        desc=f"Processing raw OpenAI PRM800K {phase}",
     )
 
     if cache_dir:
@@ -263,3 +299,66 @@ def build_raw_phase2_dataset(
         processed.save_to_disk(cache_dir)
 
     return processed
+
+
+def build_raw_phase2_dataset(
+    *,
+    raw_data_dir: str = DEFAULT_RAW_DATA_DIR,
+    cache_dir: Optional[str] = None,
+    force_rebuild: bool = False,
+    neutral_policy: str = "nonnegative",
+    stop_at_first_negative: bool = True,
+) -> DatasetDict:
+    return build_raw_phase_dataset(
+        raw_data_dir=raw_data_dir,
+        phase="phase2",
+        cache_dir=cache_dir,
+        force_rebuild=force_rebuild,
+        neutral_policy=neutral_policy,
+        stop_at_first_negative=stop_at_first_negative,
+    )
+
+
+def build_raw_phase1_phase2_dataset(
+    *,
+    raw_data_dir: str = DEFAULT_RAW_DATA_DIR,
+    cache_dir: Optional[str] = None,
+    force_rebuild: bool = False,
+    neutral_policy: str = "nonnegative",
+    stop_at_first_negative: bool = True,
+) -> DatasetDict:
+    if cache_dir is None:
+        cache_dir = phase1_phase2_cache_dir(
+            neutral_policy=neutral_policy,
+            stop_at_first_negative=stop_at_first_negative,
+        )
+
+    if cache_dir and os.path.isdir(cache_dir) and not force_rebuild:
+        return load_from_disk(cache_dir)
+
+    phase1 = build_raw_phase_dataset(
+        raw_data_dir=raw_data_dir,
+        phase="phase1",
+        force_rebuild=force_rebuild,
+        neutral_policy=neutral_policy,
+        stop_at_first_negative=stop_at_first_negative,
+    )
+    phase2 = build_raw_phase_dataset(
+        raw_data_dir=raw_data_dir,
+        phase="phase2",
+        force_rebuild=force_rebuild,
+        neutral_policy=neutral_policy,
+        stop_at_first_negative=stop_at_first_negative,
+    )
+    combined = DatasetDict(
+        {
+            split: concatenate_datasets([phase1[split], phase2[split]])
+            for split in ("train", "test")
+        }
+    )
+
+    if cache_dir:
+        os.makedirs(os.path.dirname(cache_dir), exist_ok=True)
+        combined.save_to_disk(cache_dir)
+
+    return combined

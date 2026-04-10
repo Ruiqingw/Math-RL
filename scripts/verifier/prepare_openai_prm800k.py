@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Materialize a local stepwise dataset from raw OpenAI PRM800K phase2 JSONL files.
+Materialize local stepwise datasets from raw OpenAI PRM800K JSONL files.
 """
 
 from __future__ import annotations
@@ -15,13 +15,21 @@ if SCRIPT_DIR not in sys.path:
 
 from openai_prm_raw import (
     DEFAULT_RAW_DATA_DIR,
+    build_raw_phase1_phase2_dataset,
     build_raw_phase2_dataset,
+    phase1_phase2_cache_dir,
     phase2_cache_dir,
 )
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Prepare raw OpenAI PRM800K phase2 for token-PRM training.")
+    parser = argparse.ArgumentParser(description="Prepare raw OpenAI PRM800K for token-PRM training.")
+    parser.add_argument(
+        "--dataset-source",
+        default="raw_phase2",
+        choices=["raw_phase2", "raw_phase1_phase2"],
+        help="Which raw PRM800K view to materialize.",
+    )
     parser.add_argument("--raw-data-dir", default=DEFAULT_RAW_DATA_DIR)
     parser.add_argument("--cache-dir", default="")
     parser.add_argument(
@@ -41,17 +49,32 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    cache_dir = args.cache_dir or phase2_cache_dir(
-        neutral_policy=args.neutral_policy,
-        stop_at_first_negative=not args.all_steps,
-    )
-    dataset = build_raw_phase2_dataset(
-        raw_data_dir=args.raw_data_dir,
-        cache_dir=cache_dir,
-        force_rebuild=args.force_rebuild,
-        neutral_policy=args.neutral_policy,
-        stop_at_first_negative=not args.all_steps,
-    )
+    if args.dataset_source == "raw_phase2":
+        cache_dir = args.cache_dir or phase2_cache_dir(
+            neutral_policy=args.neutral_policy,
+            stop_at_first_negative=not args.all_steps,
+        )
+        dataset = build_raw_phase2_dataset(
+            raw_data_dir=args.raw_data_dir,
+            cache_dir=cache_dir,
+            force_rebuild=args.force_rebuild,
+            neutral_policy=args.neutral_policy,
+            stop_at_first_negative=not args.all_steps,
+        )
+    elif args.dataset_source == "raw_phase1_phase2":
+        cache_dir = args.cache_dir or phase1_phase2_cache_dir(
+            neutral_policy=args.neutral_policy,
+            stop_at_first_negative=not args.all_steps,
+        )
+        dataset = build_raw_phase1_phase2_dataset(
+            raw_data_dir=args.raw_data_dir,
+            cache_dir=cache_dir,
+            force_rebuild=args.force_rebuild,
+            neutral_policy=args.neutral_policy,
+            stop_at_first_negative=not args.all_steps,
+        )
+    else:
+        raise ValueError(f"Unsupported dataset source: {args.dataset_source}")
 
     print(f"Saved processed dataset to: {cache_dir}")
     for split in ("train", "test"):
