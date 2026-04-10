@@ -126,7 +126,6 @@ def verifier_shaping_reward(
     rewards = []
     base_correct_flags = []
     min_step_scores = []
-    min_penalties = []
     if gold_answer is None:
         gold_answer = [None] * len(completions)
 
@@ -171,18 +170,15 @@ def verifier_shaping_reward(
         # min aggregation preserves PRM usefulness better than averaging, which
         # can dilute a single bad step across many fluent-looking steps.
         min_step_score = min(step_scores)
-        min_centered_score = min_step_score - verifier_threshold
-        min_penalty = max(verifier_threshold - min_step_score, 0.0)
         min_step_scores.append(float(min_step_score))
-        min_penalties.append(float(min_penalty))
 
-        # Conservative PRM usage:
+        # Min-form shaping:
         # - Correct final answers keep the clean 0/1 boxed reward only.
-        # - Incorrect final answers receive only a non-positive min-step penalty.
+        # - Incorrect final answers receive min_step_score directly as shaping.
         if base_correct:
             shaping = 0.0
         else:
-            shaping = verifier_beta * min(min_centered_score, 0.0)
+            shaping = verifier_beta * min_step_score
         rewards.append(float(shaping))
         base_correct_flags.append(base_correct)
 
@@ -220,10 +216,6 @@ def verifier_shaping_reward(
                 log_metric(
                     "verifier_shaping_reward/min_step_score_mean",
                     float(sum(min_step_scores) / len(min_step_scores)),
-                )
-                log_metric(
-                    "verifier_shaping_reward/min_penalty_mean",
-                    float(sum(min_penalties) / len(min_penalties)),
                 )
             if verifier_tiebreak_only:
                 log_metric("verifier_shaping_reward/gate_active_group_count", float(active_tiebreak_groups))
