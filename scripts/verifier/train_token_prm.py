@@ -86,7 +86,7 @@ WANDB_PROJECT = "math_rl_token_prm"
 PER_DEVICE_TRAIN_BATCH_SIZE = 2
 PER_DEVICE_EVAL_BATCH_SIZE = 4
 EVAL_ROW_FRACTION = 0.125
-NEG_LOSS_WEIGHT = 5.0
+NEG_LOSS_WEIGHT = 3.5
 FOCAL_GAMMA = 2.0
 MAX_STEPS = 20000
 WARMUP_RATIO = 0.01
@@ -170,8 +170,9 @@ class TokenPRMTrainer(Trainer):
         os.makedirs(output_dir, exist_ok=True)
         unwrapped = self.model.module if hasattr(self.model, "module") else self.model
         unwrapped.save_pretrained(output_dir)
-        if self.tokenizer is not None:
-            self.tokenizer.save_pretrained(output_dir)
+        tok = getattr(self, "processing_class", None) or self.tokenizer
+        if tok is not None:
+            tok.save_pretrained(output_dir)
         logger.info("Saved token-PRM model to %s", output_dir)
 
     def _save_optimizer_and_scheduler(self, output_dir):
@@ -201,7 +202,7 @@ class TokenPRMTrainer(Trainer):
                         example.problem,
                         steps,
                         model,
-                        self.tokenizer,
+                        getattr(self, "processing_class", None) or self.tokenizer,
                         self._label_tokens,
                         device=device,
                         max_length=self._best_of_n_verifier_max_length,
