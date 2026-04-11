@@ -38,12 +38,21 @@ from token_prm import (
     pair_logits_from_causal_lm_logits,
     select_label_token_pair,
 )
+from token_reward_fn import score_steps as score_steps_token_prm
+from step_splitter import split_into_steps
 from openai_prm_raw import (
     DEFAULT_RAW_DATA_DIR,
     build_raw_phase1_phase2_dataset,
     build_raw_phase2_dataset,
     phase1_phase2_cache_dir,
     phase2_cache_dir,
+)
+from eval_prm_best_of_n import (
+    aggregate_step_scores,
+    load_reused_generations,
+    majority_vote_answer,
+    safe_math_score,
+    score_majority_answer,
 )
 
 try:
@@ -77,10 +86,17 @@ WANDB_PROJECT = "math_rl_token_prm"
 PER_DEVICE_TRAIN_BATCH_SIZE = 2
 PER_DEVICE_EVAL_BATCH_SIZE = 4
 EVAL_ROW_FRACTION = 0.125
-NEG_LOSS_WEIGHT = 10.0
+NEG_LOSS_WEIGHT = 2.0
 FOCAL_GAMMA = 2.0
 MAX_STEPS = 20000
 WARMUP_RATIO = 0.01
+BEST_OF_N_REUSE_JSONL = (
+    "/root/autodl-tmp/prm_grpo/outputs/prm_best_of_n/math_test_100_best_of_16.jsonl"
+)
+BEST_OF_N_EVAL_MAX_SAMPLES = 100
+BEST_OF_N_PRM_AGGREGATION = "min"
+BEST_OF_N_VERIFIER_MAX_LENGTH = 1024
+BEST_OF_N_VERIFIER_BATCH_SIZE = 8
 
 
 def training_mode_tag(freeze_base_model: bool) -> str:
@@ -161,6 +177,81 @@ class TokenPRMTrainer(Trainer):
     def _save_optimizer_and_scheduler(self, output_dir):
         logger.info("Skipping optimizer/scheduler save for token-PRM checkpoint: %s", output_dir)
 
+    def _evaluate_best_of_n_metric(self, metric_key_prefix: str) -> Dict[str, float]:
+        examples = getattr(self, "_best_of_n_examples", None)
+        sampled_completions = getattr(self, "_best_of_n_sampled_completions", None)
+        if not examples or not sampled_completions:
+            return {}
+
+        model = self.model.module if hasattr(self.model, "module") else self.model
+        was_training = model.training
+        device = str(self.args.device)
+        best_correct = []
+
+        model.eval()
+        try:
+            for example, completion_group in zip(examples, sampled_completions):
+                if not completion_group:
+                    best_correct.append(0.0)
+                    continue
+                scored_group = []
+                for text in completion_group:
+                    steps = split_into_steps(text)
+                    step_scores = score_steps_token_prm(
+                        example.problem,
+                        steps,
+                        model,
+                        self.tokenizer,
+                        self._label_tokens,
+                        device=device,
+                        max_length=self._best_of_n_verifier_max_length,
+                        batch_size=self._best_of_n_verifier_batch_size,
+                    )
+                    scored_group.append(
+                        aggregate_step_scores(step_scores, self._best_of_n_prm_aggregation)
+                    )
+
+                best_idx = max(range(len(scored_group)), key=lambda idx: scored_group[idx])
+                best_text = completion_group[best_idx]
+                best_correct.append(safe_math_score(best_text, example.gold_answer))
+        finally:
+            if was_training:
+                model.train()
+
+        best_of_n_accuracy = float(np.mean(best_correct)) if best_correct else 0.0
+        return {
+            f"{metric_key_prefix}_prm_best_of_16_accuracy": best_of_n_accuracy,
+            f"{metric_key_prefix}_prm_best_of_16_vs_greedy_gap": (
+                best_of_n_accuracy - self._best_of_n_reference_metrics["greedy_accuracy"]
+            ),
+            f"{metric_key_prefix}_prm_best_of_16_vs_majority_gap": (
+                best_of_n_accuracy - self._best_of_n_reference_metrics["majority_vote_accuracy"]
+            ),
+        }
+
+    def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix: str = "eval"):
+        metrics = super().evaluate(
+            eval_dataset=eval_dataset,
+            ignore_keys=ignore_keys,
+            metric_key_prefix=metric_key_prefix,
+        )
+
+        if not self.is_world_process_zero():
+            return metrics
+
+        extra_metrics = self._evaluate_best_of_n_metric(metric_key_prefix)
+        if extra_metrics:
+            logger.info(
+                "Fixed best-of-N eval: prm_best_of_16_accuracy=%.4f (greedy=%.4f majority=%.4f oracle=%.4f)",
+                extra_metrics[f"{metric_key_prefix}_prm_best_of_16_accuracy"],
+                self._best_of_n_reference_metrics["greedy_accuracy"],
+                self._best_of_n_reference_metrics["majority_vote_accuracy"],
+                self._best_of_n_reference_metrics["sample_oracle_accuracy"],
+            )
+            metrics.update(extra_metrics)
+            self.log(extra_metrics)
+        return metrics
+
 
 def compute_metrics(eval_pred):
     pair_logits, labels = eval_pred
@@ -218,6 +309,51 @@ def compute_metrics(eval_pred):
         "neg_average_precision": neg_average_precision,
         "best_balanced_accuracy": float(best_balanced_accuracy),
         "best_balanced_accuracy_threshold": float(best_balanced_accuracy_threshold),
+    }
+
+
+def load_fixed_best_of_n_eval() -> Optional[dict]:
+    if not BEST_OF_N_REUSE_JSONL or not os.path.exists(BEST_OF_N_REUSE_JSONL):
+        logger.warning(
+            "Fixed best-of-N eval JSONL was not found, skipping rerank metric: %s",
+            BEST_OF_N_REUSE_JSONL,
+        )
+        return None
+
+    examples, greedy_texts, sampled_completions = load_reused_generations(
+        BEST_OF_N_REUSE_JSONL,
+        BEST_OF_N_EVAL_MAX_SAMPLES,
+    )
+
+    greedy_correct = []
+    majority_correct = []
+    oracle_correct = []
+    for row_idx, example in enumerate(examples):
+        completion_group = sampled_completions[row_idx]
+        sample_scores = [safe_math_score(text, example.gold_answer) for text in completion_group]
+        majority_answer, _ = majority_vote_answer(completion_group)
+        greedy_correct.append(safe_math_score(greedy_texts[row_idx], example.gold_answer))
+        majority_correct.append(score_majority_answer(majority_answer, example.gold_answer))
+        oracle_correct.append(max(sample_scores) if sample_scores else 0.0)
+
+    reference_metrics = {
+        "greedy_accuracy": float(np.mean(greedy_correct)) if greedy_correct else 0.0,
+        "majority_vote_accuracy": float(np.mean(majority_correct)) if majority_correct else 0.0,
+        "sample_oracle_accuracy": float(np.mean(oracle_correct)) if oracle_correct else 0.0,
+    }
+    logger.info(
+        "Loaded fixed best-of-N eval set: jsonl=%s examples=%s greedy=%.4f majority=%.4f oracle=%.4f aggregation=%s",
+        BEST_OF_N_REUSE_JSONL,
+        f"{len(examples):,}",
+        reference_metrics["greedy_accuracy"],
+        reference_metrics["majority_vote_accuracy"],
+        reference_metrics["sample_oracle_accuracy"],
+        BEST_OF_N_PRM_AGGREGATION,
+    )
+    return {
+        "examples": examples,
+        "sampled_completions": sampled_completions,
+        "reference_metrics": reference_metrics,
     }
 
 
@@ -299,6 +435,7 @@ def main() -> None:
         logger.info("Training mode: full fine-tuning token PRM")
 
     ds = load_training_dataset()
+    fixed_best_of_n_eval = load_fixed_best_of_n_eval()
     eval_max_rows = max(1, int(len(ds["test"]) * EVAL_ROW_FRACTION))
     train_ds = TokenPRMDataset(
         ds["train"],
@@ -346,6 +483,10 @@ def main() -> None:
         wandb.run.summary["training/max_steps"] = MAX_STEPS
         wandb.run.summary["training/warmup_ratio"] = WARMUP_RATIO
         wandb.run.summary["training/full_run_steps_uncapped"] = full_run_steps
+        if fixed_best_of_n_eval is not None:
+            wandb.run.summary["best_of_n/reference_greedy_accuracy"] = fixed_best_of_n_eval["reference_metrics"]["greedy_accuracy"]
+            wandb.run.summary["best_of_n/reference_majority_vote_accuracy"] = fixed_best_of_n_eval["reference_metrics"]["majority_vote_accuracy"]
+            wandb.run.summary["best_of_n/reference_sample_oracle_accuracy"] = fixed_best_of_n_eval["reference_metrics"]["sample_oracle_accuracy"]
 
     training_args = TrainingArguments(
         output_dir=output_dir,
@@ -392,6 +533,22 @@ def main() -> None:
     trainer._label_tokens = label_tokens
     trainer._neg_loss_weight = NEG_LOSS_WEIGHT
     trainer._focal_gamma = FOCAL_GAMMA
+    trainer._best_of_n_prm_aggregation = BEST_OF_N_PRM_AGGREGATION
+    trainer._best_of_n_verifier_max_length = BEST_OF_N_VERIFIER_MAX_LENGTH
+    trainer._best_of_n_verifier_batch_size = BEST_OF_N_VERIFIER_BATCH_SIZE
+    trainer._best_of_n_examples = fixed_best_of_n_eval["examples"] if fixed_best_of_n_eval is not None else None
+    trainer._best_of_n_sampled_completions = (
+        fixed_best_of_n_eval["sampled_completions"] if fixed_best_of_n_eval is not None else None
+    )
+    trainer._best_of_n_reference_metrics = (
+        fixed_best_of_n_eval["reference_metrics"]
+        if fixed_best_of_n_eval is not None
+        else {
+            "greedy_accuracy": 0.0,
+            "majority_vote_accuracy": 0.0,
+            "sample_oracle_accuracy": 0.0,
+        }
+    )
 
     logger.info("Starting token-prediction PRM training...")
     trainer.train()
