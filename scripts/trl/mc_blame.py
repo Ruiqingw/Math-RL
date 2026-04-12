@@ -82,13 +82,8 @@ def greedy_complete(
 
 
 def check_answer(text: str, gold_answer: str) -> bool:
-    from reward_fn import compute_math_score
+    from verl.utils.reward_score.math_reward import compute_score
     try:
-        return compute_math_score(text, gold_answer) > 0.0
-    except Exception:
-        pass
-    try:
-        from verl.utils.reward_score.math_reward import compute_score
         return compute_score(text, ground_truth=gold_answer) > 0.0
     except Exception:
         return False
