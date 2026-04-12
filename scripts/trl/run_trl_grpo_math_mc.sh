@@ -36,13 +36,13 @@ VLLM_MODE="${VLLM_MODE:-colocate}"
 VLLM_GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.3}"
 
 MC_BLAME_MODEL_PATH="${MC_BLAME_MODEL_PATH:-$MODEL_PATH}"
-MC_BLAME_DEVICE="${MC_BLAME_DEVICE:-cuda}"
 MC_BLAME_BETA="${MC_BLAME_BETA:-0.5}"
 MC_BLAME_MAX_NEW_TOKENS="${MC_BLAME_MAX_NEW_TOKENS:-512}"
+MC_BLAME_GPU_MEMORY_UTILIZATION="${MC_BLAME_GPU_MEMORY_UTILIZATION:-0.15}"
 
 cd "$PROJECT_ROOT"
 
-ARGS=(--model-path "$MODEL_PATH" --data-dir "$DATA_DIR" --output-dir "$OUTPUT_DIR" --run-name "$RUN_NAME" --train-max-samples "$TRAIN_MAX_SAMPLES" --eval-max-samples "$EVAL_MAX_SAMPLES" --max-prompt-length "$MAX_PROMPT_LENGTH" --max-completion-length "$MAX_COMPLETION_LENGTH" --per-device-train-batch-size "$PER_DEVICE_TRAIN_BATCH_SIZE" --per-device-eval-batch-size "$PER_DEVICE_EVAL_BATCH_SIZE" --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS" --num-generations "$NUM_GENERATIONS" --num-generations-eval "$NUM_GENERATIONS_EVAL" --learning-rate "$LEARNING_RATE" --beta "$BETA" --num-train-epochs "$NUM_TRAIN_EPOCHS" --logging-steps "$LOGGING_STEPS" --eval-steps "$EVAL_STEPS" --save-steps "$SAVE_STEPS" --bf16 --mc-blame-model-path "$MC_BLAME_MODEL_PATH" --mc-blame-device "$MC_BLAME_DEVICE" --mc-blame-beta "$MC_BLAME_BETA" --mc-blame-max-new-tokens "$MC_BLAME_MAX_NEW_TOKENS")
+ARGS=(--model-path "$MODEL_PATH" --data-dir "$DATA_DIR" --output-dir "$OUTPUT_DIR" --run-name "$RUN_NAME" --train-max-samples "$TRAIN_MAX_SAMPLES" --eval-max-samples "$EVAL_MAX_SAMPLES" --max-prompt-length "$MAX_PROMPT_LENGTH" --max-completion-length "$MAX_COMPLETION_LENGTH" --per-device-train-batch-size "$PER_DEVICE_TRAIN_BATCH_SIZE" --per-device-eval-batch-size "$PER_DEVICE_EVAL_BATCH_SIZE" --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS" --num-generations "$NUM_GENERATIONS" --num-generations-eval "$NUM_GENERATIONS_EVAL" --learning-rate "$LEARNING_RATE" --beta "$BETA" --num-train-epochs "$NUM_TRAIN_EPOCHS" --logging-steps "$LOGGING_STEPS" --eval-steps "$EVAL_STEPS" --save-steps "$SAVE_STEPS" --bf16 --mc-blame-model-path "$MC_BLAME_MODEL_PATH" --mc-blame-beta "$MC_BLAME_BETA" --mc-blame-max-new-tokens "$MC_BLAME_MAX_NEW_TOKENS" --mc-blame-gpu-memory-utilization "$MC_BLAME_GPU_MEMORY_UTILIZATION")
 
 if [[ "$USE_VLLM" == "1" ]]; then
   ARGS+=(--use-vllm --vllm-mode "$VLLM_MODE" --vllm-gpu-memory-utilization "$VLLM_GPU_MEMORY_UTILIZATION")

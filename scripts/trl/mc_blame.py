@@ -2,14 +2,12 @@
 """
 Monte Carlo blame assignment via greedy completion from step prefixes.
 
-Core logic:
-  For a wrong rollout with N steps, binary-search for the earliest step k
-  such that greedy-completing from prefix[:k] still gets the wrong answer.
-  That step is the "blame step" — the first point where the reasoning
-  derailed beyond recovery.
+Uses vLLM for fast batched inference. Instead of binary search (sequential),
+generates completions from ALL step prefixes in one batched vLLM call,
+then finds the earliest step where recovery fails.
 
-Also provides the reward formula:
-  correct rollout  → reward = 1.0
+Reward formula:
+  correct rollout  → reward = 0.0 (math_boxed_reward provides the +1)
   wrong rollout    → reward = -beta * (total_steps - blame_step) / total_steps
 """
 
@@ -17,10 +15,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import Any, Optional
-
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from typing import Any
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 VERIFIER_DIR = os.path.join(os.path.dirname(SCRIPT_DIR), "verifier")
@@ -30,55 +25,25 @@ if VERIFIER_DIR not in sys.path:
 from step_splitter import split_into_steps  # noqa: E402
 
 
-_CACHED_BLAME_MODEL: dict[str, Any] = {
-    "key": None,
-    "model": None,
-    "tokenizer": None,
-}
+_CACHED_BLAME_LLM: dict[str, Any] = {"key": None, "llm": None}
 
 
-def _load_blame_model(model_path: str, device: str = "cuda"):
-    cache_key = f"{model_path}::{device}"
-    if _CACHED_BLAME_MODEL["key"] == cache_key:
-        return _CACHED_BLAME_MODEL["model"], _CACHED_BLAME_MODEL["tokenizer"]
+def _load_blame_llm(model_path: str, gpu_memory_utilization: float = 0.15):
+    if _CACHED_BLAME_LLM["key"] == model_path:
+        return _CACHED_BLAME_LLM["llm"]
 
-    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "left"
+    from vllm import LLM
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        torch_dtype=torch.bfloat16,
-        device_map=device,
+    llm = LLM(
+        model=model_path,
+        gpu_memory_utilization=gpu_memory_utilization,
+        dtype="bfloat16",
+        max_model_len=2048,
         trust_remote_code=True,
     )
-    model.eval()
-
-    _CACHED_BLAME_MODEL["key"] = cache_key
-    _CACHED_BLAME_MODEL["model"] = model
-    _CACHED_BLAME_MODEL["tokenizer"] = tokenizer
-    return model, tokenizer
-
-
-def greedy_complete(
-    model,
-    tokenizer,
-    prefix: str,
-    max_new_tokens: int = 512,
-) -> str:
-    inputs = tokenizer(prefix, return_tensors="pt", truncation=True, max_length=1536)
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
-    with torch.no_grad():
-        output_ids = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            do_sample=False,
-            temperature=1.0,
-            pad_token_id=tokenizer.pad_token_id,
-        )
-    new_tokens = output_ids[0, inputs["input_ids"].shape[1]:]
-    return tokenizer.decode(new_tokens, skip_special_tokens=True)
+    _CACHED_BLAME_LLM["key"] = model_path
+    _CACHED_BLAME_LLM["llm"] = llm
+    return llm
 
 
 def check_answer(text: str, gold_answer: str) -> bool:
@@ -87,47 +52,6 @@ def check_answer(text: str, gold_answer: str) -> bool:
         return compute_score(text, ground_truth=gold_answer) > 0.0
     except Exception:
         return False
-
-
-def find_blame_step(
-    model,
-    tokenizer,
-    prompt: str,
-    steps: list[str],
-    gold_answer: str,
-    max_new_tokens: int = 512,
-) -> int:
-    """Binary search for the earliest step from which greedy completion fails.
-
-    Returns the 1-indexed blame step (1 = first step is already wrong).
-    If greedy completion from the full prompt (no steps) also fails,
-    returns 1.  If completion from all steps somehow succeeds, returns
-    len(steps) (last step blamed by default).
-    """
-    n = len(steps)
-    if n == 0:
-        return 1
-
-    def _can_recover(k: int) -> bool:
-        """Check if greedy completing from prefix of first k steps gets it right."""
-        if k == 0:
-            prefix = prompt
-        else:
-            prefix = prompt + "\n\n" + "\n\n".join(steps[:k])
-        completion = greedy_complete(model, tokenizer, prefix, max_new_tokens)
-        full_text = prefix + completion
-        return check_answer(full_text, gold_answer)
-
-    lo, hi = 0, n
-    while lo < hi:
-        mid = (lo + hi) // 2
-        if _can_recover(mid):
-            lo = mid + 1
-        else:
-            hi = mid
-
-    blame = lo + 1
-    return min(blame, n)
 
 
 def blame_reward(
@@ -140,50 +64,93 @@ def blame_reward(
     return -beta * (total_steps - blame_step) / total_steps
 
 
-def compute_blame_rewards(
+def compute_blame_rewards_batch(
     prompts: list[str],
     completions: list[str],
     gold_answers: list[str],
     base_correct: list[bool],
     model_path: str,
-    device: str = "cuda",
     beta: float = 0.5,
     max_new_tokens: int = 512,
-) -> tuple[list[float], list[dict]]:
-    """Compute blame-based rewards for a batch.
+    gpu_memory_utilization: float = 0.15,
+) -> list[float]:
+    """Compute blame-based rewards for a batch using vLLM batched inference.
 
-    Returns:
-        rewards: list of floats (1.0 for correct, negative for wrong)
-        diagnostics: list of dicts with blame details for each wrong rollout
+    All wrong rollouts' step prefixes are collected and generated in ONE
+    vLLM call for maximum throughput.
     """
-    model, tokenizer = _load_blame_model(model_path, device)
+    from vllm import SamplingParams
 
-    rewards: list[float] = []
-    diagnostics: list[dict] = []
+    wrong_indices: list[int] = []
+    wrong_steps: list[list[str]] = []
+    wrong_prompts: list[str] = []
+    wrong_answers: list[str] = []
 
     for i, (prompt, completion, gold, correct) in enumerate(
         zip(prompts, completions, gold_answers, base_correct)
     ):
-        if correct:
-            rewards.append(1.0)
-            diagnostics.append({"correct": True})
+        if not correct:
+            steps = split_into_steps(completion)
+            wrong_indices.append(i)
+            wrong_steps.append(steps)
+            wrong_prompts.append(prompt)
+            wrong_answers.append(gold)
+
+    rewards = [0.0] * len(prompts)
+
+    if not wrong_indices:
+        return rewards
+
+    all_prefixes: list[str] = []
+    prefix_map: list[tuple[int, int]] = []  # (wrong_idx_in_list, step_k)
+
+    for wi, (prompt, steps) in enumerate(zip(wrong_prompts, wrong_steps)):
+        n = len(steps)
+        if n == 0:
+            orig_idx = wrong_indices[wi]
+            rewards[orig_idx] = -beta
+            continue
+        for k in range(n + 1):
+            if k == 0:
+                prefix = prompt
+            else:
+                prefix = prompt + "\n\n" + "\n\n".join(steps[:k])
+            all_prefixes.append(prefix)
+            prefix_map.append((wi, k))
+
+    if not all_prefixes:
+        return rewards
+
+    llm = _load_blame_llm(model_path, gpu_memory_utilization)
+    sampling_params = SamplingParams(
+        max_tokens=max_new_tokens,
+        temperature=0,
+        top_p=1.0,
+    )
+    outputs = llm.generate(all_prefixes, sampling_params)
+
+    results: dict[int, dict[int, bool]] = {}
+    for idx, ((wi, k), output) in enumerate(zip(prefix_map, outputs)):
+        completion_text = output.outputs[0].text
+        full_text = all_prefixes[idx] + completion_text
+        correct = check_answer(full_text, wrong_answers[wi])
+        results.setdefault(wi, {})[k] = correct
+
+    for wi in range(len(wrong_indices)):
+        steps = wrong_steps[wi]
+        n = len(steps)
+        if n == 0:
             continue
 
-        steps = split_into_steps(completion)
-        n_steps = len(steps)
+        step_results = results.get(wi, {})
+        blame = n
+        for k in range(n + 1):
+            if not step_results.get(k, False):
+                blame = k + 1
+                break
 
-        blame = find_blame_step(
-            model, tokenizer, prompt, steps, gold,
-            max_new_tokens=max_new_tokens,
-        )
-        reward = blame_reward(blame, n_steps, beta=beta)
-        rewards.append(reward)
-        diagnostics.append({
-            "correct": False,
-            "n_steps": n_steps,
-            "blame_step": blame,
-            "reward": reward,
-            "blame_frac": blame / n_steps if n_steps > 0 else 0.0,
-        })
+        blame = min(blame, n)
+        orig_idx = wrong_indices[wi]
+        rewards[orig_idx] = blame_reward(blame, n, beta=beta)
 
-    return rewards, diagnostics
+    return rewards

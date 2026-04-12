@@ -322,70 +322,43 @@ class MathVerifierReward:
 
 
 class MCBlameReward:
-    """Monte Carlo blame-based step-level reward for wrong rollouts.
+    """Monte Carlo blame-based step-level reward using vLLM batched inference.
 
-    For each wrong rollout, binary-searches for the earliest step from which
-    greedy completion still fails.  Reward is proportional to how late that
-    blame step is: early blame → large penalty, late blame → small penalty.
-
+    All wrong rollouts' step prefixes are generated in one batched vLLM call.
     Correct rollouts get 0.0 (the +1 comes from math_boxed_reward).
     """
 
     def __init__(
         self,
         model_path: str,
-        device: str = "cuda",
         beta: float = 0.5,
         max_new_tokens: int = 512,
+        gpu_memory_utilization: float = 0.15,
     ):
         self.model_path = model_path
-        self.device = device
         self.beta = beta
         self.max_new_tokens = max_new_tokens
+        self.gpu_memory_utilization = gpu_memory_utilization
         self.__name__ = "mc_blame_reward"
 
     def __call__(self, prompts, completions, gold_answer, **kwargs):
-        from scripts.trl.mc_blame import (
-            _load_blame_model,
-            blame_reward,
-            find_blame_step,
-        )
+        from scripts.trl.mc_blame import compute_blame_rewards_batch
 
-        model, tokenizer = _load_blame_model(self.model_path, self.device)
-        log_metric = kwargs.get("log_metric")
-
-        rewards = []
-        blame_steps_logged = []
-        blame_fracs_logged = []
-
-        for prompt, completion, answer in zip(prompts, completions, gold_answer):
-            completion_text = normalize_completion(completion)
+        completion_texts = [normalize_completion(c) for c in completions]
+        base_correct = []
+        for ct, ans in zip(completion_texts, gold_answer):
             try:
-                correct = bool(compute_score(completion_text, ground_truth=answer))
+                base_correct.append(bool(compute_score(ct, ground_truth=ans)))
             except Exception:
-                correct = False
+                base_correct.append(False)
 
-            if correct:
-                rewards.append(0.0)
-                continue
-
-            steps = split_into_steps(completion_text)
-            n_steps = len(steps)
-            if n_steps == 0:
-                rewards.append(-self.beta)
-                continue
-
-            blame = find_blame_step(
-                model, tokenizer, prompt, steps, answer,
-                max_new_tokens=self.max_new_tokens,
-            )
-            reward = blame_reward(blame, n_steps, beta=self.beta)
-            rewards.append(float(reward))
-            blame_steps_logged.append(blame)
-            blame_fracs_logged.append(blame / n_steps)
-
-        if log_metric is not None and blame_steps_logged:
-            log_metric("mc_blame_reward/avg_blame_step", sum(blame_steps_logged) / len(blame_steps_logged))
-            log_metric("mc_blame_reward/avg_blame_frac", sum(blame_fracs_logged) / len(blame_fracs_logged))
-
-        return rewards
+        return compute_blame_rewards_batch(
+            prompts=prompts,
+            completions=completion_texts,
+            gold_answers=gold_answer,
+            base_correct=base_correct,
+            model_path=self.model_path,
+            beta=self.beta,
+            max_new_tokens=self.max_new_tokens,
+            gpu_memory_utilization=self.gpu_memory_utilization,
+        )

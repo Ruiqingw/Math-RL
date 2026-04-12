@@ -52,9 +52,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora-alpha", type=int, default=32)
     parser.add_argument("--lora-dropout", type=float, default=0.0)
     parser.add_argument("--mc-blame-model-path", default=None, help="Model for blame completion. Defaults to --model-path.")
-    parser.add_argument("--mc-blame-device", default="cuda")
     parser.add_argument("--mc-blame-beta", type=float, default=0.5)
     parser.add_argument("--mc-blame-max-new-tokens", type=int, default=512)
+    parser.add_argument("--mc-blame-gpu-memory-utilization", type=float, default=0.15)
     return parser.parse_args()
 
 
@@ -120,9 +120,9 @@ def main() -> None:
 
     mc_blame = MCBlameReward(
         model_path=blame_model_path,
-        device=args.mc_blame_device,
         beta=args.mc_blame_beta,
         max_new_tokens=args.mc_blame_max_new_tokens,
+        gpu_memory_utilization=args.mc_blame_gpu_memory_utilization,
     )
 
     trainer = GRPOTrainer(
