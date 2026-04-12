@@ -319,3 +319,73 @@ class MathVerifierReward:
             **kwargs,
         )
         return [float(base + shaping) for base, shaping in zip(base_rewards, shaping_rewards)]
+
+
+class MCBlameReward:
+    """Monte Carlo blame-based step-level reward for wrong rollouts.
+
+    For each wrong rollout, binary-searches for the earliest step from which
+    greedy completion still fails.  Reward is proportional to how late that
+    blame step is: early blame → large penalty, late blame → small penalty.
+
+    Correct rollouts get 0.0 (the +1 comes from math_boxed_reward).
+    """
+
+    def __init__(
+        self,
+        model_path: str,
+        device: str = "cuda",
+        beta: float = 0.5,
+        max_new_tokens: int = 512,
+    ):
+        self.model_path = model_path
+        self.device = device
+        self.beta = beta
+        self.max_new_tokens = max_new_tokens
+        self.__name__ = "mc_blame_reward"
+
+    def __call__(self, prompts, completions, gold_answer, **kwargs):
+        from scripts.trl.mc_blame import (
+            _load_blame_model,
+            blame_reward,
+            find_blame_step,
+        )
+
+        model, tokenizer = _load_blame_model(self.model_path, self.device)
+        log_metric = kwargs.get("log_metric")
+
+        rewards = []
+        blame_steps_logged = []
+        blame_fracs_logged = []
+
+        for prompt, completion, answer in zip(prompts, completions, gold_answer):
+            completion_text = normalize_completion(completion)
+            try:
+                correct = bool(compute_score(completion_text, ground_truth=answer))
+            except Exception:
+                correct = False
+
+            if correct:
+                rewards.append(0.0)
+                continue
+
+            steps = split_into_steps(completion_text)
+            n_steps = len(steps)
+            if n_steps == 0:
+                rewards.append(-self.beta)
+                continue
+
+            blame = find_blame_step(
+                model, tokenizer, prompt, steps, answer,
+                max_new_tokens=self.max_new_tokens,
+            )
+            reward = blame_reward(blame, n_steps, beta=self.beta)
+            rewards.append(float(reward))
+            blame_steps_logged.append(blame)
+            blame_fracs_logged.append(blame / n_steps)
+
+        if log_metric is not None and blame_steps_logged:
+            log_metric("mc_blame_reward/avg_blame_step", sum(blame_steps_logged) / len(blame_steps_logged))
+            log_metric("mc_blame_reward/avg_blame_frac", sum(blame_fracs_logged) / len(blame_fracs_logged))
+
+        return rewards
