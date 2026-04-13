@@ -74,7 +74,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-MODEL_NAME = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B"
+MODEL_NAME = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-7B-Instruct"
 OUTPUT_ROOT = "/root/autodl-tmp/prm_grpo/token_prm_runs"
 DATASET_SOURCE = "raw_phase1_phase2"
 RAW_DATA_DIR = DEFAULT_RAW_DATA_DIR
@@ -86,7 +86,7 @@ WANDB_PROJECT = "math_rl_token_prm"
 PER_DEVICE_TRAIN_BATCH_SIZE = 2
 PER_DEVICE_EVAL_BATCH_SIZE = 4
 EVAL_ROW_FRACTION = 0.125
-NEG_LOSS_WEIGHT = 3.0
+NEG_LOSS_WEIGHT = 5.0
 FOCAL_GAMMA = 2.0
 MAX_STEPS = 20000
 WARMUP_RATIO = 0.01
