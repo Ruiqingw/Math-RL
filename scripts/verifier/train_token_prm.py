@@ -407,7 +407,7 @@ def main() -> None:
         f"{dataset_tag(DATASET_SOURCE, neutral_policy=RAW_NEUTRAL_POLICY, stop_at_first_negative=STOP_AT_FIRST_NEGATIVE)}-"
         f"eval{int(EVAL_ROW_FRACTION * 100)}-"
         f"negw{str(NEG_LOSS_WEIGHT).replace('.', 'p')}-"
-        f"focalg{str(FOCAL_GAMMA).replace('.', 'p')}-qwen25-math-1.5b"
+        f"focalg{str(FOCAL_GAMMA).replace('.', 'p')}-qwen25-math-7b-instruct"
     )
     output_dir = os.path.join(OUTPUT_ROOT, run_name)
     logger.info(
