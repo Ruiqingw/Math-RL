@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sys
 from typing import Dict, Optional
 
@@ -90,6 +91,7 @@ NEG_LOSS_WEIGHT = 5.0
 FOCAL_GAMMA = 2.0
 MAX_STEPS = 20000
 WARMUP_RATIO = 0.01
+SAVE_TOTAL_LIMIT = 1
 BEST_OF_N_REUSE_JSONL = (
     "/root/autodl-tmp/prm_grpo/outputs/prm_best_of_n/math_test_100_best_of_16.jsonl"
 )
@@ -177,6 +179,25 @@ class TokenPRMTrainer(Trainer):
 
     def _save_optimizer_and_scheduler(self, output_dir):
         logger.info("Skipping optimizer/scheduler save for token-PRM checkpoint: %s", output_dir)
+
+    def _prune_checkpoints_to_best_only(self) -> None:
+        output_dir = self.args.output_dir
+        if not output_dir or not os.path.isdir(output_dir):
+            return
+
+        best_checkpoint = self.state.best_model_checkpoint
+        for name in os.listdir(output_dir):
+            checkpoint_dir = os.path.join(output_dir, name)
+            if not (os.path.isdir(checkpoint_dir) and name.startswith("checkpoint-")):
+                continue
+            if best_checkpoint and os.path.abspath(checkpoint_dir) == os.path.abspath(best_checkpoint):
+                continue
+            logger.info("Removing non-best token-PRM checkpoint: %s", checkpoint_dir)
+            shutil.rmtree(checkpoint_dir, ignore_errors=True)
+
+    def _save_checkpoint(self, *args, **kwargs):
+        super()._save_checkpoint(*args, **kwargs)
+        self._prune_checkpoints_to_best_only()
 
     def _evaluate_best_of_n_metric(self, metric_key_prefix: str) -> Dict[str, float]:
         examples = getattr(self, "_best_of_n_examples", None)
@@ -508,8 +529,8 @@ def main() -> None:
         eval_steps=500,
         save_strategy="steps",
         save_steps=500,
-        save_total_limit=1,
-        load_best_model_at_end=False,
+        save_total_limit=SAVE_TOTAL_LIMIT,
+        load_best_model_at_end=True,
         dataloader_num_workers=2,
         remove_unused_columns=False,
         report_to="wandb",
@@ -555,10 +576,16 @@ def main() -> None:
 
     logger.info("Starting token-prediction PRM training...")
     trainer.train()
-
-    final_dir = os.path.join(output_dir, "final")
-    logger.info("Saving final token-PRM model to %s", final_dir)
-    trainer.save_model(final_dir)
+    trainer._prune_checkpoints_to_best_only()
+    logger.info(
+        "Training complete. best_checkpoint=%s save_total_limit=%s",
+        trainer.state.best_model_checkpoint,
+        SAVE_TOTAL_LIMIT,
+    )
+    if wandb is not None and wandb.run is not None:
+        if trainer.state.best_model_checkpoint:
+            wandb.run.summary["training/best_checkpoint"] = trainer.state.best_model_checkpoint
+        wandb.run.summary["training/save_total_limit"] = SAVE_TOTAL_LIMIT
     logger.info("Done.")
 
 
