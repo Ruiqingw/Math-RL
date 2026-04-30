@@ -21,7 +21,10 @@ Mainline decisions:
 - Train a self-owned Qwen-style `<extra_0>` PRM.
 - Use `AutoModelForTokenClassification`, not the old `Answer:` -> `+/-` causal
   token protocol as the mainline.
-- Use `Qwen2.5-Math-7B-Instruct` with LoRA first.
+- Use `Qwen2.5-Math-1.5B-Instruct` as the main GRPO policy model.
+- Treat earlier non-instruct `Qwen2.5-Math-1.5B` results as historical
+  reference only, not the main matched baseline for new PRM claims.
+- Use `Qwen2.5-Math-7B-Instruct` as the PRM base with LoRA first.
 - Use `raw_phase1_phase2 + all-steps`.
 - Preserve the current label policy: `rating >= 0 -> positive`.
 - Keep old classifier-head and causal-token PRM paths as ablations.
@@ -88,6 +91,8 @@ Training runs on the server.
 - Create and use conda environment `math-rl`.
 - Use Alibaba or Tsinghua mirrors by default.
 - Download models from ModelScope into a local `models/` directory.
+- Default GRPO policy model path should be configurable, with
+  `models/Qwen2.5-Math-1.5B-Instruct` as the intended local path.
 - Default PRM base model path should be configurable, with
   `models/Qwen2.5-Math-7B-Instruct` as the intended local path.
 
@@ -113,14 +118,17 @@ GPU 0,1,2: TRL GRPO policy training
 GPU 3:     PRM reward server
 ```
 
-The PRM reward server should load the PRM once on the dedicated GPU. TRL reward
-functions should call the server instead of loading a full PRM inside every
-policy rank.
+Use `Qwen2.5-Math-1.5B-Instruct` for the policy ranks and
+`Qwen2.5-Math-7B-Instruct` for PRM training/scoring. The PRM reward server
+should load the PRM once on the dedicated GPU. TRL reward functions should call
+the server instead of loading a full PRM inside every policy rank.
 
 ## Experiment Policy
 
 - Always run or identify a matched pure-rule GRPO baseline before claiming PRM
   improvement.
+- Re-run majority voting and pure-rule GRPO baselines with the same
+  `Qwen2.5-Math-1.5B-Instruct` policy used by the PRM-shaped run.
 - Compare under the same data slice, seed, training steps, and eval set.
 - Beta search is sequential with early stop:
 

@@ -43,7 +43,7 @@ from token_reward_fn import (  # noqa: E402
 )
 
 
-DEFAULT_MODEL_PATH = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B"
+DEFAULT_MODEL_PATH = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B-Instruct"
 DEFAULT_VERIFIER_MODEL_PATH = (
     "/root/autodl-tmp/prm_grpo/token_prm_runs/"
     "prm-token-fullft-phase2raw-nonneg-firsterr-eval12-negw10p0-focalg2p0-qwen25-math-1.5b/"

@@ -30,14 +30,16 @@ Current high-level conclusions from prior experiments:
 
 The active refactor plan is:
 
-1. Train a Qwen-style PRM with `<extra_0>` markers after each reasoning step.
-2. Compute PRM loss only at `<extra_0>` positions.
-3. Use LoRA first on `Qwen2.5-Math-7B-Instruct`.
-4. Use `raw_phase1_phase2 + all-steps` PRM800K data with the existing label
+1. Use `Qwen2.5-Math-1.5B-Instruct` as the main GRPO policy model.
+2. Re-run majority voting and pure-rule GRPO baselines with that same policy.
+3. Train a Qwen-style PRM with `<extra_0>` markers after each reasoning step.
+4. Compute PRM loss only at `<extra_0>` positions.
+5. Use LoRA first on `Qwen2.5-Math-7B-Instruct` as the PRM base.
+6. Use `raw_phase1_phase2 + all-steps` PRM800K data with the existing label
    policy: `rating >= 0 -> positive`.
-5. Select PRM checkpoints by fixed-candidate best-of-N reranking quality, not
+7. Select PRM checkpoints by fixed-candidate best-of-N reranking quality, not
    only step-level balanced accuracy.
-6. Use PRM scores in GRPO through wrong-only continuous shaping:
+8. Use PRM scores in GRPO through wrong-only continuous shaping:
 
 ```text
 reward = base_correct + beta * (1 - base_correct) * prm_score
@@ -51,6 +53,13 @@ The final target runtime shape is:
 ```text
 GPU 0,1,2: TRL GRPO policy training
 GPU 3:     PRM reward server
+```
+
+The intended model split is:
+
+```text
+policy model: Qwen2.5-Math-1.5B-Instruct
+PRM model:    Qwen2.5-Math-7B-Instruct
 ```
 
 Single-GPU smoke tests are acceptable during development, but final validation
@@ -128,6 +137,7 @@ Training is intended to run on a remote GPU server. The planned environment is:
 conda environment: math-rl
 model source:      ModelScope
 local model dir:   models/
+default policy:    models/Qwen2.5-Math-1.5B-Instruct
 default base PRM:  models/Qwen2.5-Math-7B-Instruct
 ```
 
@@ -192,6 +202,10 @@ docs/server-setup.md
 The current goal is to find one wrong-only PRM GRPO run that beats the matched
 pure-rule GRPO baseline under the same data slice, seed, training steps, and
 evaluation set.
+
+The matched baseline should be re-run from `Qwen2.5-Math-1.5B-Instruct`.
+Earlier non-instruct `Qwen2.5-Math-1.5B` results are historical references, not
+the primary comparison for new PRM-shaped runs.
 
 The beta search should stop early:
 

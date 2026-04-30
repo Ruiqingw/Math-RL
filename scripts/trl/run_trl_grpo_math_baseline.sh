@@ -7,10 +7,10 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 
-MODEL_PATH="${MODEL_PATH:-/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B}"
+MODEL_PATH="${MODEL_PATH:-/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B-Instruct}"
 DATA_DIR="${DATA_DIR:-/root/autodl-tmp/prm_grpo/data/trl_math}"
-OUTPUT_DIR="${OUTPUT_DIR:-/root/autodl-tmp/prm_grpo/outputs/trl_grpo_math_baseline}"
-RUN_NAME="${RUN_NAME:-trl-grpo-math-baseline}"
+OUTPUT_DIR="${OUTPUT_DIR:-/root/autodl-tmp/prm_grpo/outputs/trl_grpo_math_instruct_baseline}"
+RUN_NAME="${RUN_NAME:-trl-grpo-math-instruct-baseline}"
 
 TRAIN_MAX_SAMPLES="${TRAIN_MAX_SAMPLES:-7500}"
 EVAL_MAX_SAMPLES="${EVAL_MAX_SAMPLES:-200}"

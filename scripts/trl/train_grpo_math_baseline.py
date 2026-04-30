@@ -12,7 +12,7 @@ from trl import GRPOConfig, GRPOTrainer
 from scripts.trl.rewards import math_boxed_reward
 
 
-DEFAULT_MODEL_PATH = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B"
+DEFAULT_MODEL_PATH = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B-Instruct"
 DEFAULT_DATA_DIR = "/root/autodl-tmp/prm_grpo/data/trl_math"
 DEFAULT_WANDB_PROJECT = "math_rl_trl"
 
@@ -21,8 +21,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a TRL GRPO baseline on MATH.")
     parser.add_argument("--model-path", default=DEFAULT_MODEL_PATH)
     parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR)
-    parser.add_argument("--output-dir", default="/root/autodl-tmp/prm_grpo/outputs/trl_grpo_math_baseline")
-    parser.add_argument("--run-name", default="trl-grpo-math-baseline")
+    parser.add_argument("--output-dir", default="/root/autodl-tmp/prm_grpo/outputs/trl_grpo_math_instruct_baseline")
+    parser.add_argument("--run-name", default="trl-grpo-math-instruct-baseline")
     parser.add_argument("--train-max-samples", type=int, default=7500)
     parser.add_argument("--eval-max-samples", type=int, default=200)
     parser.add_argument("--max-prompt-length", type=int, default=512)

@@ -37,6 +37,10 @@ The intended mainline is:
   network-dependent operations.
 - Before starting any long training run, test W&B connectivity from the same
   environment and proxy shell to avoid training failures caused by W&B timeout.
+- Main GRPO policy model should be `Qwen2.5-Math-1.5B-Instruct`.
+- Earlier non-instruct `Qwen2.5-Math-1.5B` results are historical references
+  only. Re-run majority voting and pure-rule GRPO baselines with the instruct
+  policy before claiming PRM-shaped GRPO improvement.
 - The old classifier-head verifier and `Answer:` -> `+/-` token PRM should be
   preserved as ablation baselines, not deleted.
 - Negative imbalance handling should remain available, but strong negative
@@ -53,6 +57,8 @@ The intended mainline is:
 - Main online GRPO target is 4 GPUs total: three GPUs for TRL GRPO policy and
   one GPU for a PRM reward server. Single-GPU smoke tests are allowed during
   development, but final validation must use the 3+1 GPU shape.
+- In the final 3+1 setup, use `Qwen2.5-Math-1.5B-Instruct` for the policy ranks
+  and the trained `Qwen2.5-Math-7B-Instruct`-based PRM on the reward-server GPU.
 - Success criterion: stop at the first wrong-only PRM GRPO run that beats the
   matched pure-rule baseline under the same data slice, seed, training steps,
   and eval set.
@@ -100,6 +106,8 @@ The intended mainline is:
     dropped-supervision rate.
 
 - [ ] Add server model download/setup notes.
+  - Create or update a runbook section with the ModelScope download command for
+    Qwen2.5-Math-1.5B-Instruct.
   - Create or update a runbook section with the ModelScope download command for
     Qwen2.5-Math-7B-Instruct.
   - Store downloaded models under a local `models/` directory.
@@ -298,12 +306,15 @@ The intended mainline is:
 
 - [ ] Run fixed-candidate offline reranking before GRPO.
   - Use the same 100-problem, 16-candidate JSONL.
+  - Generate or reuse candidates from the new main policy
+    `Qwen2.5-Math-1.5B-Instruct` when making the main comparison.
   - Compare extra0 PRM against old causal token PRM and majority vote.
   - Do not start GRPO unless offline reranking is at least competitive enough
     to justify online shaping.
 
 - [ ] Run GRPO experiments in early-stop order.
-  - Pure rule reward baseline.
+  - Majority voting baseline with `Qwen2.5-Math-1.5B-Instruct`.
+  - Pure rule reward baseline with `Qwen2.5-Math-1.5B-Instruct`.
   - Wrong-only PRM shaping with `beta=0.05`.
   - Run `beta=0.1` only if `beta=0.05` does not beat the matched pure-rule
     baseline.

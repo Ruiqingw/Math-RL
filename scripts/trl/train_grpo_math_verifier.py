@@ -12,7 +12,7 @@ from trl import GRPOConfig, GRPOTrainer
 from scripts.trl.rewards import VerifierShapingReward, math_boxed_reward
 
 
-DEFAULT_MODEL_PATH = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B"
+DEFAULT_MODEL_PATH = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B-Instruct"
 DEFAULT_DATA_DIR = "/root/autodl-tmp/prm_grpo/data/trl_math"
 DEFAULT_WANDB_PROJECT = "math_rl_trl"
 DEFAULT_VERIFIER_MODEL_PATH = "/root/autodl-tmp/prm_grpo/token_prm_runs/prm-token-fullft-phase2raw-nonneg-firsterr-eval12-negw10p0-focalg2p0-qwen25-math-1.5b/final"
@@ -22,8 +22,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a TRL GRPO verifier-shaped run on MATH.")
     parser.add_argument("--model-path", default=DEFAULT_MODEL_PATH)
     parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR)
-    parser.add_argument("--output-dir", default="/root/autodl-tmp/prm_grpo/outputs/trl_grpo_math_verifier")
-    parser.add_argument("--run-name", default="trl-grpo-math-verifier")
+    parser.add_argument("--output-dir", default="/root/autodl-tmp/prm_grpo/outputs/trl_grpo_math_instruct_verifier")
+    parser.add_argument("--run-name", default="trl-grpo-math-instruct-verifier")
     parser.add_argument("--train-max-samples", type=int, default=7500)
     parser.add_argument("--eval-max-samples", type=int, default=200)
     parser.add_argument("--max-prompt-length", type=int, default=512)
