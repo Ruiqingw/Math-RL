@@ -235,6 +235,11 @@ detects it from token-classification config or PEFT `TOKEN_CLS` adapter
 metadata. The older `classifier` and `token_prm` backends remain available for
 ablations.
 
+The summary reports PRM accuracy against greedy, majority vote, and oracle on
+the same candidate pool, plus correct/wrong candidate score means, misranking
+count/fraction, and whether selected wrong candidates are longer or have more
+parsed steps than the best-scored correct candidate in the same group.
+
 ## Model Directory
 
 Base models should be downloaded into the repository-local `models/` directory.

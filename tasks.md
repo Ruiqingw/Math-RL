@@ -181,7 +181,7 @@ The intended mainline is:
   - Preserve existing `classifier` and `token_prm` backends.
   - Reuse the same aggregation options: `min`, `mean`, `mean_log`, `sum_log`.
 
-- [ ] Add reranking diagnostics for the new backend.
+- [x] Add reranking diagnostics for the new backend.
   - Report candidate correct/wrong score means.
   - Report misranking count among examples where at least one correct sample
     exists.

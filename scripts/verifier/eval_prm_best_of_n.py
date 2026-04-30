@@ -559,6 +559,12 @@ def main() -> None:
     prm_best_correct = []
     oracle_correct = []
     boxed_counts = []
+    candidate_correct_prm_scores = []
+    candidate_wrong_prm_scores = []
+    solvable_group_count = 0
+    misranking_count = 0
+    selected_wrong_more_steps_count = 0
+    selected_wrong_longer_count = 0
 
     with open(args.output_jsonl, "w", encoding="utf-8") as writer:
         for row_idx, example in enumerate(examples):
@@ -580,6 +586,29 @@ def main() -> None:
             prm_best_correct.append(prm_score)
             oracle_correct.append(oracle_score)
             boxed_counts.append(boxed_count)
+
+            for sample_score, score_record in zip(sample_scores, prm_scores[row_idx]):
+                prm_score_value = score_record["score"]
+                if not math.isfinite(prm_score_value):
+                    continue
+                if sample_score >= 0.5:
+                    candidate_correct_prm_scores.append(prm_score_value)
+                else:
+                    candidate_wrong_prm_scores.append(prm_score_value)
+
+            correct_indices = [idx for idx, score in enumerate(sample_scores) if score >= 0.5]
+            if correct_indices:
+                solvable_group_count += 1
+                if best_prm_idx >= 0 and sample_scores[best_prm_idx] < 0.5:
+                    misranking_count += 1
+                    best_correct_idx = max(
+                        correct_indices,
+                        key=lambda idx: prm_scores[row_idx][idx]["score"],
+                    )
+                    if prm_scores[row_idx][best_prm_idx]["n_steps"] > prm_scores[row_idx][best_correct_idx]["n_steps"]:
+                        selected_wrong_more_steps_count += 1
+                    if len(sampled_texts[best_prm_idx]) > len(sampled_texts[best_correct_idx]):
+                        selected_wrong_longer_count += 1
 
             sampled_records = []
             for sample_idx, text in enumerate(sampled_texts):
@@ -627,6 +656,24 @@ def main() -> None:
     sample_total = sum(len(group) for group in sampled_completions)
     effective_num_generations = round(sample_total / n) if n else args.num_generations
     boxed_rate = sum(boxed_counts) / sample_total if sample_total else 0.0
+    vs_greedy_gap = prm_best_acc - greedy_acc
+    vs_majority_gap = prm_best_acc - majority_acc
+    vs_oracle_gap = prm_best_acc - oracle_acc
+    misranking_frac = misranking_count / solvable_group_count if solvable_group_count else 0.0
+    selected_wrong_more_steps_rate = (
+        selected_wrong_more_steps_count / misranking_count if misranking_count else 0.0
+    )
+    selected_wrong_longer_rate = selected_wrong_longer_count / misranking_count if misranking_count else 0.0
+    candidate_correct_score_mean = (
+        sum(candidate_correct_prm_scores) / len(candidate_correct_prm_scores)
+        if candidate_correct_prm_scores
+        else 0.0
+    )
+    candidate_wrong_score_mean = (
+        sum(candidate_wrong_prm_scores) / len(candidate_wrong_prm_scores)
+        if candidate_wrong_prm_scores
+        else 0.0
+    )
 
     print("\n" + "=" * 80)
     print("Summary")
@@ -636,7 +683,16 @@ def main() -> None:
     print(f"majority_vote_accuracy    : {majority_acc:.4f}")
     print(f"prm_best_of_{effective_num_generations}_accuracy : {prm_best_acc:.4f}")
     print(f"sample_oracle_accuracy    : {oracle_acc:.4f}")
+    print(f"prm_vs_greedy_gap         : {vs_greedy_gap:.4f}")
+    print(f"prm_vs_majority_gap       : {vs_majority_gap:.4f}")
+    print(f"prm_vs_oracle_gap         : {vs_oracle_gap:.4f}")
     print(f"sample_boxed_rate         : {boxed_rate:.4f}")
+    print(f"candidate_correct_score_mean : {candidate_correct_score_mean:.4f}")
+    print(f"candidate_wrong_score_mean   : {candidate_wrong_score_mean:.4f}")
+    print(f"misranking_count         : {misranking_count}/{solvable_group_count}")
+    print(f"misranking_frac          : {misranking_frac:.4f}")
+    print(f"selected_wrong_more_steps_rate : {selected_wrong_more_steps_rate:.4f}")
+    print(f"selected_wrong_longer_rate     : {selected_wrong_longer_rate:.4f}")
     print(f"output_jsonl              : {args.output_jsonl}")
 
 
