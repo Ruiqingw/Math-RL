@@ -227,6 +227,14 @@ enables a row-level `WeightedRandomSampler` only for explicit imbalance
 ablations; keep `--neg-loss-weight` and `--focal-gamma` as the first-line
 controls.
 
+## Offline Reranking Eval
+
+Use `scripts/verifier/eval_prm_best_of_n.py` for fixed-candidate PRM reranking.
+The active extra0 backend is `--verifier-backend extra0_token_cls`; `auto`
+detects it from token-classification config or PEFT `TOKEN_CLS` adapter
+metadata. The older `classifier` and `token_prm` backends remain available for
+ablations.
+
 ## Model Directory
 
 Base models should be downloaded into the repository-local `models/` directory.

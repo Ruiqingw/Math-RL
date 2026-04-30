@@ -175,7 +175,7 @@ The intended mainline is:
 
 ## Phase 2: Integrate Extra0 PRM Into Offline Evaluation
 
-- [ ] Extend `scripts/verifier/eval_prm_best_of_n.py`.
+- [x] Extend `scripts/verifier/eval_prm_best_of_n.py`.
   - Add backend support for `extra0_token_cls`.
   - Auto-detect extra0 PRM checkpoints when possible.
   - Preserve existing `classifier` and `token_prm` backends.

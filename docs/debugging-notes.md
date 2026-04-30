@@ -81,3 +81,23 @@ Runtime and setup issues are recorded here in chronological order.
 - final fix: changed `origin` to `git@github.com:Ruiqingw/Math-RL.git`.
 - verification status: verified. SSH authentication succeeded and the setup
   milestone was pushed to `origin/token-prm-openai-style`.
+
+## 2026-05-01 - Offline reranking evaluator required missing `verl`
+
+- command or script:
+  `PYTHONNOUSERSITE=1 /Work21/2024/luyuheng/miniconda3/envs/math-rl/bin/python scripts/verifier/eval_prm_best_of_n.py --help`
+- environment details: repository `/Work21/2024/luyuheng/Math-RL`, branch
+  `token-prm-openai-style`, conda env `math-rl`.
+- error message or symptom: `ModuleNotFoundError: No module named 'verl'` from
+  the top-level import of `verl.utils.reward_score.math_reward`.
+- root cause: the evaluator was on the active TRL/verifier path but imported a
+  legacy verl reward helper at module import time. The server environment does
+  not install `verl` for the active path.
+- attempted fixes: searched for local math reward helpers and inspected the
+  installed `math_verify` API.
+- final fix: added a fallback implementation in
+  `scripts/verifier/eval_prm_best_of_n.py` using `math_verify` for answer
+  checking and a local boxed-answer extractor when `verl` is unavailable.
+- verification status: verified. The evaluator `--help` command starts in the
+  `math-rl` environment, and backend auto-detection smoke tests pass for
+  classifier, extra0 token-classification, and token PRM checkpoints.

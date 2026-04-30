@@ -26,7 +26,55 @@ import datasets
 import torch
 from tqdm import tqdm
 
-from verl.utils.reward_score.math_reward import compute_score, last_boxed_only_string, remove_boxed
+try:
+    from verl.utils.reward_score.math_reward import compute_score, last_boxed_only_string, remove_boxed
+except ModuleNotFoundError:
+    try:
+        from math_verify import parse as math_verify_parse
+        from math_verify import verify as math_verify_verify
+    except ModuleNotFoundError:  # pragma: no cover
+        math_verify_parse = None
+        math_verify_verify = None
+
+    def last_boxed_only_string(text: str) -> str | None:
+        start = str(text).rfind("\\boxed")
+        if start < 0:
+            return None
+        brace_start = text.find("{", start)
+        if brace_start < 0:
+            return None
+        depth = 0
+        for idx in range(brace_start, len(text)):
+            char = text[idx]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : idx + 1]
+        return None
+
+    def remove_boxed(boxed: str) -> str:
+        text = str(boxed).strip()
+        prefix = "\\boxed{"
+        if text.startswith(prefix) and text.endswith("}"):
+            return text[len(prefix) : -1]
+        return text
+
+    def compute_score(solution_str: str, ground_truth: str) -> float:
+        if math_verify_parse is not None and math_verify_verify is not None:
+            gold = math_verify_parse(str(ground_truth))
+            pred = math_verify_parse(str(solution_str))
+            if math_verify_verify(gold, pred):
+                return 1.0
+            boxed = last_boxed_only_string(solution_str)
+            if boxed is not None and math_verify_verify(gold, math_verify_parse(remove_boxed(boxed))):
+                return 1.0
+            return 0.0
+
+        boxed = last_boxed_only_string(solution_str)
+        pred_answer = remove_boxed(boxed) if boxed is not None else str(solution_str).strip()
+        return 1.0 if pred_answer.strip() == str(ground_truth).strip() else 0.0
 
 
 os.environ.setdefault("VLLM_WORKER_MULTIPROC_METHOD", "spawn")
@@ -40,6 +88,10 @@ from reward_fn import PRMClassifier, score_steps as score_steps_classifier  # no
 from token_reward_fn import (  # noqa: E402
     load_model_bundle as load_token_prm_bundle,
     score_steps as score_steps_token_prm,
+)
+from qwen_extra0_prm import (  # noqa: E402
+    load_extra0_prm,
+    score_steps as score_steps_extra0,
 )
 
 
@@ -87,8 +139,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--verifier-backend",
         default="auto",
-        choices=["auto", "token_prm", "classifier"],
-        help="Verifier backend. auto uses classifier when cls_head.pt exists, otherwise token_prm.",
+        choices=["auto", "token_prm", "classifier", "extra0_token_cls"],
+        help="Verifier backend. auto detects classifier, extra0 token-classification, or token_prm checkpoints.",
     )
     parser.add_argument(
         "--data-dir",
@@ -299,11 +351,38 @@ def aggregate_step_scores(step_scores: list[float], mode: str) -> float:
     raise ValueError(f"Unsupported PRM aggregation: {mode}")
 
 
+def _load_json_file(path: str) -> dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as reader:
+        return json.load(reader)
+
+
+def detect_prm_backend(verifier_model_path: str) -> str:
+    if os.path.exists(os.path.join(verifier_model_path, "cls_head.pt")):
+        return "classifier"
+
+    adapter_config_path = os.path.join(verifier_model_path, "adapter_config.json")
+    if os.path.exists(adapter_config_path):
+        adapter_config = _load_json_file(adapter_config_path)
+        if str(adapter_config.get("task_type", "")).upper() == "TOKEN_CLS":
+            return "extra0_token_cls"
+
+    config_path = os.path.join(verifier_model_path, "config.json")
+    if os.path.exists(config_path):
+        config = _load_json_file(config_path)
+        architectures = [str(item) for item in config.get("architectures", [])]
+        if any("TokenClassification" in architecture for architecture in architectures):
+            return "extra0_token_cls"
+        if int(config.get("num_labels", 0) or 0) == 2 and config.get("id2label") is not None:
+            return "extra0_token_cls"
+
+    return "token_prm"
+
+
 def load_prm_bundle(args: argparse.Namespace) -> PRMBundle:
     cls_head_path = os.path.join(args.verifier_model_path, "cls_head.pt")
     backend = args.verifier_backend
     if backend == "auto":
-        backend = "classifier" if os.path.exists(cls_head_path) else "token_prm"
+        backend = detect_prm_backend(args.verifier_model_path)
 
     if backend == "classifier":
         from transformers import AutoTokenizer
@@ -317,6 +396,14 @@ def load_prm_bundle(args: argparse.Namespace) -> PRMBundle:
             tokenizer.pad_token = tokenizer.eos_token
         tokenizer.truncation_side = "left"
         model = PRMClassifier.from_pretrained(args.verifier_model_path, device=args.verifier_device)
+        return PRMBundle(backend=backend, model=model, tokenizer=tokenizer)
+
+    if backend == "extra0_token_cls":
+        device_map = None if args.verifier_device == "cpu" else "auto"
+        model, tokenizer, _ = load_extra0_prm(
+            args.verifier_model_path,
+            device_map=device_map,
+        )
         return PRMBundle(backend=backend, model=model, tokenizer=tokenizer)
 
     device_map = None if args.verifier_device == "cpu" else "auto"
@@ -342,6 +429,17 @@ def score_steps_with_prm(
             device=args.verifier_device,
             max_length=args.verifier_max_length,
             batch_size=args.verifier_batch_size,
+        )
+
+    if bundle.backend == "extra0_token_cls":
+        return score_steps_extra0(
+            problem,
+            steps,
+            bundle.model,
+            bundle.tokenizer,
+            device=args.verifier_device,
+            max_length=args.verifier_max_length,
+            require_all_steps=False,
         )
 
     return score_steps_token_prm(
