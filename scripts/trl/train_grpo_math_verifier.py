@@ -67,9 +67,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--verifier-device", default="cuda")
     parser.add_argument("--verifier-max-length", type=int, default=1024)
     parser.add_argument("--verifier-batch-size", type=int, default=4)
-    parser.add_argument("--verifier-beta", type=float, default=0.3)
+    parser.add_argument("--verifier-beta", type=float, default=0.05)
     parser.add_argument("--verifier-delta", type=float, default=0.05)
     parser.add_argument("--verifier-threshold", type=float, default=0.4)
+    parser.add_argument("--verifier-reward-mode", default="wrong_only", choices=["wrong_only", "all_wrong_tiebreak"])
     parser.add_argument("--verifier-tiebreak-only", action="store_true", default=False)
     parser.add_argument("--no-verifier-tiebreak-only", dest="verifier_tiebreak_only", action="store_false")
     parser.add_argument("--verifier-server-url", default="http://127.0.0.1:8008")
@@ -134,7 +135,8 @@ def main() -> None:
         vllm_gpu_memory_utilization=args.vllm_gpu_memory_utilization,
         seed=args.seed,
     )
-    training_args.aux_reward_only_when_base_zero_variance = args.verifier_tiebreak_only
+    verifier_tiebreak_only = args.verifier_tiebreak_only or args.verifier_reward_mode == "all_wrong_tiebreak"
+    training_args.aux_reward_only_when_base_zero_variance = verifier_tiebreak_only
     training_args.aux_reward_base_name = "math_boxed_reward"
     training_args.aux_reward_name = "verifier_shaping_reward"
     training_args.aux_reward_all_zero_only = True
@@ -148,7 +150,7 @@ def main() -> None:
         verifier_beta=args.verifier_beta,
         verifier_delta=args.verifier_delta,
         verifier_threshold=args.verifier_threshold,
-        verifier_tiebreak_only=args.verifier_tiebreak_only,
+        verifier_tiebreak_only=verifier_tiebreak_only,
         verifier_server_url=args.verifier_server_url,
         verifier_server_timeout=args.verifier_server_timeout,
     )

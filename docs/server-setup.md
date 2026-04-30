@@ -263,6 +263,18 @@ Correct final answers receive no PRM penalty. Keep
 `--verifier-tiebreak-only` / `VERIFIER_TIEBREAK_ONLY=1` only as an explicit
 all-wrong-group ablation.
 
+Use `VERIFIER_REWARD_MODE=wrong_only` for the main path. Sequential beta sweep
+examples:
+
+```bash
+VERIFIER_REWARD_MODE=wrong_only VERIFIER_BETA=0.05 bash scripts/trl/run_trl_grpo_math_verifier.sh
+VERIFIER_REWARD_MODE=wrong_only VERIFIER_BETA=0.1  bash scripts/trl/run_trl_grpo_math_verifier.sh
+VERIFIER_REWARD_MODE=wrong_only VERIFIER_BETA=0.2  bash scripts/trl/run_trl_grpo_math_verifier.sh
+```
+
+Use `VERIFIER_REWARD_MODE=all_wrong_tiebreak` only for the all-wrong-group
+ablation.
+
 For the final 3+1 GPU shape, run the PRM once as a local server on the
 dedicated GPU and point TRL at it:
 

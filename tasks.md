@@ -257,7 +257,7 @@ The intended mainline is:
     - `reward_server/latency_ms_p95`
     - `reward_server/error_count`
 
-- [ ] Update `scripts/trl/run_trl_grpo_math_verifier.sh`.
+- [x] Update `scripts/trl/run_trl_grpo_math_verifier.sh`.
   - Add a reward mode variable such as `VERIFIER_REWARD_MODE=wrong_only`.
   - Keep `all_wrong_tiebreak` as an explicit mode.
   - Add beta sweep defaults or documented examples for `0.05`, `0.1`, `0.2`.

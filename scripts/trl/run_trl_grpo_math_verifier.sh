@@ -40,12 +40,20 @@ VERIFIER_BACKEND="${VERIFIER_BACKEND:-auto}"
 VERIFIER_DEVICE="${VERIFIER_DEVICE:-cuda}"
 VERIFIER_MAX_LENGTH="${VERIFIER_MAX_LENGTH:-1024}"
 VERIFIER_BATCH_SIZE="${VERIFIER_BATCH_SIZE:-4}"
-VERIFIER_BETA="${VERIFIER_BETA:-0.3}"
+VERIFIER_BETA="${VERIFIER_BETA:-0.05}"
 VERIFIER_DELTA="${VERIFIER_DELTA:-0.05}"
 VERIFIER_THRESHOLD="${VERIFIER_THRESHOLD:-0.4}"
+VERIFIER_REWARD_MODE="${VERIFIER_REWARD_MODE:-wrong_only}"
 VERIFIER_TIEBREAK_ONLY="${VERIFIER_TIEBREAK_ONLY:-0}"
 VERIFIER_SERVER_URL="${VERIFIER_SERVER_URL:-http://127.0.0.1:8008}"
 VERIFIER_SERVER_TIMEOUT="${VERIFIER_SERVER_TIMEOUT:-60}"
+
+# Main beta sweep examples for wrong-only shaping:
+#   VERIFIER_REWARD_MODE=wrong_only VERIFIER_BETA=0.05 bash scripts/trl/run_trl_grpo_math_verifier.sh
+#   VERIFIER_REWARD_MODE=wrong_only VERIFIER_BETA=0.1  bash scripts/trl/run_trl_grpo_math_verifier.sh
+#   VERIFIER_REWARD_MODE=wrong_only VERIFIER_BETA=0.2  bash scripts/trl/run_trl_grpo_math_verifier.sh
+# Optional ablation:
+#   VERIFIER_REWARD_MODE=all_wrong_tiebreak bash scripts/trl/run_trl_grpo_math_verifier.sh
 
 cd "$PROJECT_ROOT"
 
@@ -78,6 +86,7 @@ ARGS=(
   --verifier-beta "$VERIFIER_BETA"
   --verifier-delta "$VERIFIER_DELTA"
   --verifier-threshold "$VERIFIER_THRESHOLD"
+  --verifier-reward-mode "$VERIFIER_REWARD_MODE"
   --verifier-server-url "$VERIFIER_SERVER_URL"
   --verifier-server-timeout "$VERIFIER_SERVER_TIMEOUT"
 )
