@@ -276,7 +276,7 @@ The intended mainline is:
 
 ## Phase 5: Reduce Step-Splitting Distribution Shift
 
-- [ ] Standardize rollout step formatting.
+- [x] Standardize rollout step formatting.
   - Update policy prompt/instruction to ask for blank-line-separated reasoning
     steps before the final boxed answer.
   - Keep the final answer in `\boxed{}`.

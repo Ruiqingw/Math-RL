@@ -242,6 +242,11 @@ parsed steps than the best-scored correct candidate in the same group.
 
 ## TRL Verifier Backend
 
+Regenerate TRL train/eval parquet before main GRPO runs after prompt changes.
+The active rollout instruction asks the policy to separate reasoning steps with
+blank lines and keep the final answer in `\boxed{}`. This keeps rollout parsing
+closer to the human step lists used by PRM800K.
+
 `scripts/trl/rewards.py` supports explicit verifier backend selection:
 `classifier`, `token_prm`, `extra0_token_cls`, and `extra0_server`; `auto`
 detects local checkpoint backends from checkpoint files. For single-process

@@ -106,7 +106,10 @@ DEFAULT_OUTPUT_JSONL = (
     "/root/autodl-tmp/prm_grpo/outputs/prm_best_of_n/"
     "math_test_100_best_of_16.jsonl"
 )
-DEFAULT_INSTRUCTION = "Let's think step by step and output the final answer within \\boxed{}."
+DEFAULT_INSTRUCTION = (
+    "Let's solve step by step. Separate each reasoning step with a blank line, "
+    "then give the final answer in \\boxed{}."
+)
 
 
 @dataclass

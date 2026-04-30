@@ -30,7 +30,10 @@ from verl.utils.reward_score.math_reward import last_boxed_only_string, remove_b
 
 
 DATA_SOURCE = "DigitalLearningGmbH/MATH-lighteval"
-DEFAULT_INSTRUCTION = "Let's think step by step and output the final answer within \\boxed{}."
+DEFAULT_INSTRUCTION = (
+    "Let's solve step by step. Separate each reasoning step with a blank line, "
+    "then give the final answer in \\boxed{}."
+)
 
 
 def extract_solution(solution_str: str) -> str:
@@ -88,7 +91,7 @@ def process_hf_example(example: dict[str, Any], idx: int, split: str, instructio
     }
 
 
-def process_verl_example(example: dict[str, Any]) -> dict[str, Any]:
+def process_verl_example(example: dict[str, Any], instruction: str) -> dict[str, Any]:
     prompt = example["prompt"]
     if isinstance(prompt, list) and prompt:
         prompt_text = prompt[0].get("content", "")
@@ -98,9 +101,13 @@ def process_verl_example(example: dict[str, Any]) -> dict[str, Any]:
     extra_info = example.get("extra_info", {}) or {}
     reward_model = example.get("reward_model", {}) or {}
 
+    problem = extra_info.get("question", "")
+    if problem:
+        prompt_text = build_prompt(problem, instruction)
+
     return {
         "prompt": prompt_text,
-        "problem": extra_info.get("question", ""),
+        "problem": problem,
         "gold_answer": reward_model.get("ground_truth", ""),
         "solution": extra_info.get("answer", ""),
         "split": extra_info.get("split", ""),
@@ -133,8 +140,8 @@ def load_from_verl_parquet(args: argparse.Namespace) -> tuple[datasets.Dataset, 
     train_dataset = datasets.load_dataset("parquet", data_files=train_path, split="train")
     test_dataset = datasets.load_dataset("parquet", data_files=test_path, split="train")
 
-    train_dataset = train_dataset.map(process_verl_example)
-    test_dataset = test_dataset.map(process_verl_example)
+    train_dataset = train_dataset.map(lambda ex: process_verl_example(ex, args.instruction))
+    test_dataset = test_dataset.map(lambda ex: process_verl_example(ex, args.instruction))
     return train_dataset, test_dataset
 
 
