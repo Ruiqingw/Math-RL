@@ -160,3 +160,31 @@ Runtime and setup issues are recorded here in chronological order.
 - verification status: verified. Synthetic smoke reported
   `extra0_was_added=true`, three `<extra_0>` positions, matching label
   positions, and three CPU forward scores.
+
+## 2026-05-01 - Offline reranking prerequisites unavailable
+
+- command or script:
+  - `find . -maxdepth 4 ... '*best_of*jsonl' ... 'adapter_config.json'`
+  - `find /root/autodl-tmp/prm_grpo ...`
+  - `python -c "import torch; print(torch.cuda.is_available(), torch.cuda.device_count())"`
+  - `nvidia-smi --query-gpu=...`
+- environment details: repository `/Work21/2024/luyuheng/Math-RL`, branch
+  `token-prm-openai-style`, conda env `math-rl`, current user `luyuheng`.
+- error message or symptom:
+  - no fixed-candidate best-of-N JSONL, extra0 PRM checkpoint, old token PRM
+    checkpoint, or classifier-head checkpoint exists under the repository.
+  - `/root/autodl-tmp/prm_grpo` returns `Permission denied` for this user.
+  - `models/Qwen2.5-Math-1.5B-Instruct` contains tokenizer/config files but
+    still has `._____temp/model.safetensors`; `models/Qwen2.5-Math-7B-Instruct`
+    is absent.
+  - `nvidia-smi` is not in PATH and PyTorch reports `cuda_available=False`,
+    `device_count=0`.
+- root cause if known: the current session lacks visible GPU resources and the
+  required model/data/checkpoint artifacts are either missing or under an
+  inaccessible root-owned path.
+- attempted fixes: searched repository-local paths, documented external
+  defaults, and user-accessible `/Work21/2024/luyuheng` paths; checked disk
+  space and CUDA visibility before starting generation/training.
+- final fix: blocked. Do not start offline reranking, PRM training, or GRPO
+  until GPU visibility and required artifacts/permissions are restored.
+- verification status: blocked at the fixed-candidate offline reranking task.

@@ -32,3 +32,19 @@
 - verification status: tokenizer has one `<extra_0>` token after setup, label
   positions match `<extra_0>` positions, and a tiny CPU Qwen2
   token-classification forward returned three scores for three steps.
+
+## 2026-05-01 - Phase 6 offline reranking prerequisite check
+
+- run name: `phase6-offline-rerank-prereq-check`
+- branch: `token-prm-openai-style`
+- environment details: conda env `math-rl`, current server session.
+- commands or scripts:
+  - searched for best-of-N JSONL and PRM checkpoints in the repository.
+  - checked `/root/autodl-tmp/prm_grpo`.
+  - checked model directory completeness under `models/`.
+  - checked GPU visibility with PyTorch and `nvidia-smi`.
+- result: blocked.
+- verification status: no usable fixed-candidate JSONL or PRM checkpoint is
+  accessible, the policy model download is incomplete, the PRM base model is
+  absent, `/root/autodl-tmp/prm_grpo` is not readable, and PyTorch reports zero
+  CUDA devices.
