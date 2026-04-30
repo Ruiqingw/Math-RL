@@ -131,6 +131,19 @@ local model dir:   models/
 default base PRM:  models/Qwen2.5-Math-7B-Instruct
 ```
 
+Server proxy startup:
+
+```bash
+cd /Work21/2024/luyuheng/Log-TIR/mihomo-server-proxy
+./start_mihomo.sh
+source ./proxy_env.sh
+```
+
+Run the proxy setup in the shell used for model downloads, W&B checks, and
+training. Before any long training run, test W&B connectivity from that same
+environment so a W&B timeout does not stop the run after GPU time has already
+started.
+
 The detailed server setup runbook is part of the task plan and should be added
 under `docs/` before full training starts.
 

@@ -31,6 +31,12 @@ The intended mainline is:
   conda environment named `math-rl` and configure dependencies inside it.
 - Use Alibaba or Tsinghua package mirrors by default when configuring the
   server environment.
+- Server network proxy is available at
+  `/Work21/2024/luyuheng/Log-TIR/mihomo-server-proxy`. Start it with
+  `./start_mihomo.sh`, then source `./proxy_env.sh` in training shells before
+  network-dependent operations.
+- Before starting any long training run, test W&B connectivity from the same
+  environment and proxy shell to avoid training failures caused by W&B timeout.
 - The old classifier-head verifier and `Answer:` -> `+/-` token PRM should be
   preserved as ablation baselines, not deleted.
 - Negative imbalance handling should remain available, but strong negative
@@ -64,8 +70,13 @@ The intended mainline is:
   - Install PyTorch with CUDA support appropriate for 4090 GPUs.
   - Install `transformers`, `datasets`, `accelerate`, `peft`, `trl`, `wandb`,
     `modelscope`, and other project dependencies.
+  - Document server proxy startup:
+    - `cd /Work21/2024/luyuheng/Log-TIR/mihomo-server-proxy`
+    - `./start_mihomo.sh`
+    - `source ./proxy_env.sh`
   - Include commands to activate the environment and verify GPU visibility.
   - Include a minimal import smoke test for core packages.
+  - Include a W&B connectivity smoke test that must pass before training starts.
 
 - [ ] Add shared Qwen-style extra0 utilities.
   - Create a module such as `scripts/verifier/qwen_extra0_prm.py`.
