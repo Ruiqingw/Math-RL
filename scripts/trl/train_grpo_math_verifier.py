@@ -3,6 +3,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
+
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from datasets import load_dataset
 from peft import LoraConfig
@@ -54,6 +59,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora-dropout", type=float, default=0.0)
     parser.add_argument("--log-completions-samples", type=int, default=8)
     parser.add_argument("--verifier-model-path", default=DEFAULT_VERIFIER_MODEL_PATH)
+    parser.add_argument("--verifier-backend", default="auto", choices=["auto", "classifier", "token_prm", "extra0_token_cls"])
     parser.add_argument("--verifier-device", default="cuda")
     parser.add_argument("--verifier-max-length", type=int, default=1024)
     parser.add_argument("--verifier-batch-size", type=int, default=4)
@@ -129,6 +135,7 @@ def main() -> None:
 
     shaping_reward = VerifierShapingReward(
         verifier_model_path=args.verifier_model_path,
+        verifier_backend=args.verifier_backend,
         verifier_device=args.verifier_device,
         verifier_max_length=args.verifier_max_length,
         verifier_batch_size=args.verifier_batch_size,

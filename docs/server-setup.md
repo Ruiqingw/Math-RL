@@ -240,6 +240,16 @@ the same candidate pool, plus correct/wrong candidate score means, misranking
 count/fraction, and whether selected wrong candidates are longer or have more
 parsed steps than the best-scored correct candidate in the same group.
 
+## TRL Verifier Backend
+
+`scripts/trl/rewards.py` supports explicit verifier backend selection:
+`classifier`, `token_prm`, and `extra0_token_cls`; `auto` detects the backend
+from checkpoint files. For extra0 PRM GRPO runs, set
+`VERIFIER_BACKEND=extra0_token_cls` or pass
+`--verifier-backend extra0_token_cls`. Reward logs include a numeric
+`verifier_shaping_reward/backend_id` and
+`verifier_shaping_reward/backend_is_extra0_token_cls`.
+
 ## Model Directory
 
 Base models should be downloaded into the repository-local `models/` directory.

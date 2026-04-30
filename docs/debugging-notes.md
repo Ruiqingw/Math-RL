@@ -95,9 +95,11 @@ Runtime and setup issues are recorded here in chronological order.
   not install `verl` for the active path.
 - attempted fixes: searched for local math reward helpers and inspected the
   installed `math_verify` API.
-- final fix: added a fallback implementation in
-  `scripts/verifier/eval_prm_best_of_n.py` using `math_verify` for answer
-  checking and a local boxed-answer extractor when `verl` is unavailable.
+- final fix: added fallback implementations in
+  `scripts/verifier/eval_prm_best_of_n.py` and `scripts/trl/rewards.py` using
+  `math_verify` for answer checking and a local boxed-answer extractor when
+  `verl` is unavailable.
 - verification status: verified. The evaluator `--help` command starts in the
-  `math-rl` environment, and backend auto-detection smoke tests pass for
-  classifier, extra0 token-classification, and token PRM checkpoints.
+  `math-rl` environment, TRL reward imports start without `verl`, and backend
+  auto-detection smoke tests pass for classifier, extra0 token-classification,
+  and token PRM checkpoints.

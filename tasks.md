@@ -190,7 +190,7 @@ The intended mainline is:
 
 ## Phase 3: Integrate Extra0 PRM Into TRL GRPO Reward
 
-- [ ] Extend `scripts/trl/rewards.py` verifier loading.
+- [x] Extend `scripts/trl/rewards.py` verifier loading.
   - Support three backends: classifier-head, old causal token PRM, and new
     extra0 token-classification PRM.
   - Keep old backends for ablations.

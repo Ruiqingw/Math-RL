@@ -36,6 +36,7 @@ VLLM_MODE="${VLLM_MODE:-colocate}"
 VLLM_GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.3}"
 
 VERIFIER_MODEL_PATH="${VERIFIER_MODEL_PATH:-/root/autodl-tmp/prm_grpo/token_prm_runs/prm-token-fullft-phase1phase2raw-nonneg-allsteps-eval12-negw3p0-focalg2p0-qwen25-math-1.5b/checkpoint-9000}"
+VERIFIER_BACKEND="${VERIFIER_BACKEND:-auto}"
 VERIFIER_DEVICE="${VERIFIER_DEVICE:-cuda}"
 VERIFIER_MAX_LENGTH="${VERIFIER_MAX_LENGTH:-1024}"
 VERIFIER_BATCH_SIZE="${VERIFIER_BATCH_SIZE:-4}"
@@ -68,6 +69,7 @@ ARGS=(
   --save-steps "$SAVE_STEPS"
   --bf16
   --verifier-model-path "$VERIFIER_MODEL_PATH"
+  --verifier-backend "$VERIFIER_BACKEND"
   --verifier-device "$VERIFIER_DEVICE"
   --verifier-max-length "$VERIFIER_MAX_LENGTH"
   --verifier-batch-size "$VERIFIER_BATCH_SIZE"
