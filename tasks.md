@@ -84,7 +84,7 @@ The intended mainline is:
   - Include a minimal import smoke test for core packages.
   - Include a W&B connectivity smoke test that must pass before training starts.
 
-- [ ] Add shared Qwen-style extra0 utilities.
+- [x] Add shared Qwen-style extra0 utilities.
   - Create a module such as `scripts/verifier/qwen_extra0_prm.py`.
   - Resolve `<extra_0>` token id from the model tokenizer.
   - Format one full solution as `problem + step_1 <extra_0> step_2 <extra_0> ...`.
