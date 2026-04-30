@@ -315,6 +315,7 @@ def verifier_shaping_reward(
     base_correct_flags = []
     min_step_scores = []
     prm_scores_by_sample: list[float | None] = []
+    parsed_step_counts: list[int] = []
     server_metrics: dict[str, float] = {}
     if gold_answer is None:
         gold_answer = [None] * len(completions)
@@ -328,7 +329,8 @@ def verifier_shaping_reward(
                 base_correct = bool(compute_score(completion_text, ground_truth=answer))
             except Exception:
                 base_correct = False
-        steps = split_into_steps(completion_text)
+        steps = [step for step in split_into_steps(completion_text) if step.strip()]
+        parsed_step_counts.append(len(steps))
         prepared_items.append(
             {
                 "problem": problem_text,
@@ -500,6 +502,13 @@ def verifier_shaping_reward(
             log_metric("reward/base_accuracy", _mean(base_reward_values))
             log_metric("reward/base_reward_mean", _mean(base_reward_values))
             log_metric("reward/base_reward_std", _std(base_reward_values))
+            log_metric("reward/parsed_step_count_mean", _mean(parsed_step_counts))
+            log_metric("reward/parsed_step_count_std", _std(parsed_step_counts))
+            log_metric(
+                "reward/valid_step_parse_frac",
+                float(sum(1 for count in parsed_step_counts if count > 0) / len(parsed_step_counts)),
+            )
+            log_metric("verifier_shaping_reward/parsed_step_count_mean", _mean(parsed_step_counts))
             log_metric("reward/all_wrong_group_frac", float(all_wrong_groups / total_groups))
             log_metric("reward/mixed_group_frac", float(mixed_groups / total_groups))
             log_metric("reward/all_correct_group_frac", float(all_correct_groups / total_groups))

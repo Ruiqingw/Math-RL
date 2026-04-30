@@ -2,14 +2,78 @@
 step_splitter.py — Split a math solution string into reasoning steps.
 
 Strategy:
-  1. Split on double newlines (paragraph breaks) first.
-  2. Within a long paragraph (>300 chars), try to further split on
-     sentence-ending punctuation followed by a newline or a capital letter.
-  3. Filter out chunks that are too short to be meaningful.
+  1. Prefer explicit structure: blank lines and numbered step lines.
+  2. Keep sentence splitting as a fallback only when no structure is present.
+  3. Merge very short structured chunks instead of dropping them.
 """
 
 import re
 from typing import List
+
+
+_NUMBERED_STEP_RE = re.compile(
+    r"^\s*(?:\(?\d+[\).:]|step\s+\d+[\).:-])\s+",
+    re.IGNORECASE,
+)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z$\\])|(?<=[.!?])\n+")
+
+
+def _nonempty_chunks(chunks: List[str]) -> List[str]:
+    return [chunk.strip() for chunk in chunks if chunk and chunk.strip()]
+
+
+def _split_numbered_lines(block: str) -> List[str]:
+    chunks: List[str] = []
+    current: List[str] = []
+
+    for raw_line in block.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if _NUMBERED_STEP_RE.match(line) and current:
+            chunks.append("\n".join(current).strip())
+            current = [line]
+        else:
+            current.append(line)
+
+    if current:
+        chunks.append("\n".join(current).strip())
+    return _nonempty_chunks(chunks)
+
+
+def _structured_split(text: str) -> List[str]:
+    paragraphs = _nonempty_chunks(re.split(r"(?:\r?\n\s*){2,}", text.strip()))
+    chunks: List[str] = []
+    for paragraph in paragraphs:
+        chunks.extend(_split_numbered_lines(paragraph))
+    return _nonempty_chunks(chunks)
+
+
+def _merge_short_steps(steps: List[str], min_chars: int) -> List[str]:
+    if min_chars <= 0 or len(steps) <= 1:
+        return _nonempty_chunks(steps)
+
+    merged: List[str] = []
+    pending = ""
+    for step in steps:
+        if len(step) >= min_chars:
+            if pending:
+                step = f"{pending}\n{step}"
+                pending = ""
+            merged.append(step)
+        elif merged:
+            merged[-1] = f"{merged[-1]}\n{step}".strip()
+        else:
+            pending = f"{pending}\n{step}".strip() if pending else step
+
+    if pending:
+        merged.append(pending)
+    return _nonempty_chunks(merged)
+
+
+def _sentence_fallback(text: str, min_chars: int) -> List[str]:
+    chunks = _nonempty_chunks(_SENTENCE_SPLIT_RE.split(text.strip()))
+    return _merge_short_steps(chunks, min_chars)
 
 
 def split_into_steps(text: str, min_chars: int = 20, max_chars_per_step: int = 300) -> List[str]:
@@ -27,30 +91,19 @@ def split_into_steps(text: str, min_chars: int = 20, max_chars_per_step: int = 3
     if not text or not text.strip():
         return [""]
 
-    # Step 1: split on double (or more) newlines
-    paragraphs = re.split(r'\n{2,}', text.strip())
+    stripped = text.strip()
+    structured_raw_steps = _structured_split(stripped)
+    if len(structured_raw_steps) > 1 and any(_NUMBERED_STEP_RE.match(step) for step in structured_raw_steps):
+        return structured_raw_steps
 
-    steps: List[str] = []
-    for para in paragraphs:
-        para = para.strip()
-        if not para:
-            continue
+    structured_steps = _merge_short_steps(structured_raw_steps, min_chars)
+    if len(structured_steps) > 1:
+        return structured_steps
+    if structured_steps and len(structured_steps[0]) <= max_chars_per_step:
+        return structured_steps
 
-        if len(para) <= max_chars_per_step:
-            if len(para) >= min_chars:
-                steps.append(para)
-        else:
-            # Step 2: split long paragraphs on sentence boundaries
-            # Matches: period/!/? followed by newline OR followed by whitespace+Capital/$+\
-            sub = re.split(r'(?<=[.!?])\n|(?<=[.!?])\s+(?=[A-Z\$\\])', para)
-            for chunk in sub:
-                chunk = chunk.strip()
-                if len(chunk) >= min_chars:
-                    steps.append(chunk)
-
-    # Fallback: never return empty list
+    steps = _sentence_fallback(stripped, min_chars)
     if not steps:
-        stripped = text.strip()
         steps = [stripped] if stripped else [""]
 
     return steps
@@ -127,5 +180,7 @@ Therefore $x = \\boxed{20}$."""
     print(f"Found {len(steps)} steps:")
     for i, s in enumerate(steps):
         print(f"  [{i+1}] {s[:80]}...")
+    numbered = "1. Let x be the value.\n2. Then x + 1 = 3.\n3. Therefore x = \\boxed{2}."
+    print("\nNumbered steps:", split_into_steps(numbered))
     print("\nExtracted answer:", extract_boxed_answer(sample))
     print("Nested boxed answer:", extract_boxed_answer(r"Final: \boxed{\frac{1}{2}}"))

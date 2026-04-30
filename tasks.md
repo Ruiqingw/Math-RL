@@ -281,7 +281,7 @@ The intended mainline is:
     steps before the final boxed answer.
   - Keep the final answer in `\boxed{}`.
 
-- [ ] Tighten `scripts/verifier/step_splitter.py`.
+- [x] Tighten `scripts/verifier/step_splitter.py`.
   - Prefer splitting on blank lines and numbered steps.
   - Keep sentence splitting only as fallback.
   - Log or expose the number of parsed steps for reward diagnostics.

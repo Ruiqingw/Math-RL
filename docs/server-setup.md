@@ -308,9 +308,9 @@ all parsed completions in a reward-function call as one scoring batch when
 `VERIFIER_BACKEND=extra0_server`.
 
 Reward diagnostics include all-wrong, mixed, and all-correct group fractions;
-wrong sample fraction; PRM score mean/std split by final-answer correctness; and
-the fraction of groups where PRM shaping changes the ranking among multiple
-wrong samples.
+wrong sample fraction; parsed step count mean/std and valid parse fraction; PRM
+score mean/std split by final-answer correctness; and the fraction of groups
+where PRM shaping changes the ranking among multiple wrong samples.
 
 The GRPO reward W&B contract uses `reward/*` for backend identity, reward mode,
 beta, base accuracy/reward statistics, group composition, PRM score behavior,
