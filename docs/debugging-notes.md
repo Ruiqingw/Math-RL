@@ -119,3 +119,23 @@ Runtime and setup issues are recorded here in chronological order.
 - final fix: direct endpoint smoke test passed for `/health` and `/score`
   request/response logic.
 - verification status: verified by `server_endpoint_smoke=ok`.
+
+## 2026-05-01 - Extra0 rollout format debug examples
+
+- command or script:
+  `PYTHONNOUSERSITE=1 $PY scripts/verifier/debug_extra0_rollout_format.py`
+- environment details: repository `/Work21/2024/luyuheng/Math-RL`, active TRL
+  reward path.
+- error message or symptom: rollout completions are free-form text, while PRM
+  training uses human step lists with inserted `<extra_0>` markers.
+- root cause if known: distribution shift can appear if rollout text is parsed
+  into different step boundaries from the PRM training examples.
+- attempted fixes: standardized policy prompts to request blank-line-separated
+  reasoning steps, tightened `step_splitter.py` to prefer blank lines and
+  numbered steps, and added `scripts/verifier/debug_extra0_rollout_format.py`
+  to compare raw rollout text, parsed steps, and inserted `<extra_0>` scoring
+  input.
+- final fix: use the debug script on synthetic examples or fixed-candidate
+  JSONL before long GRPO runs.
+- verification status: verified. The synthetic smoke test prints raw rollout
+  text, three parsed steps, and the matching `<extra_0>` scoring input.

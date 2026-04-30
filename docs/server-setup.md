@@ -307,6 +307,17 @@ The server exposes `GET /health` and batched `POST /score` endpoints. TRL sends
 all parsed completions in a reward-function call as one scoring batch when
 `VERIFIER_BACKEND=extra0_server`.
 
+When parser behavior looks suspicious, compare raw rollout text, parsed steps,
+and the inserted `<extra_0>` scoring text:
+
+```bash
+PYTHONNOUSERSITE=1 $PY scripts/verifier/debug_extra0_rollout_format.py \
+  --jsonl outputs/prm_best_of_n/math_test_100_best_of_16.jsonl \
+  --source prm_best \
+  --limit 3 \
+  --output docs/rollout-format-debug.md
+```
+
 Reward diagnostics include all-wrong, mixed, and all-correct group fractions;
 wrong sample fraction; parsed step count mean/std and valid parse fraction; PRM
 score mean/std split by final-answer correctness; and the fraction of groups

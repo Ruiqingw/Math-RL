@@ -286,7 +286,7 @@ The intended mainline is:
   - Keep sentence splitting only as fallback.
   - Log or expose the number of parsed steps for reward diagnostics.
 
-- [ ] Match PRM training and rollout scoring as much as possible.
+- [x] Match PRM training and rollout scoring as much as possible.
   - PRM800K training uses human step lists.
   - GRPO scoring uses parsed rollout steps.
   - Add debug examples comparing raw rollout text, parsed steps, and inserted
