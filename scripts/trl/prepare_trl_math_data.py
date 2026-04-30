@@ -26,7 +26,36 @@ from typing import Any
 
 import datasets
 
-from verl.utils.reward_score.math_reward import last_boxed_only_string, remove_boxed
+try:
+    from verl.utils.reward_score.math_reward import last_boxed_only_string, remove_boxed
+except ModuleNotFoundError:
+
+    def last_boxed_only_string(text: str) -> str | None:
+        start = str(text).rfind("\\boxed")
+        if start < 0:
+            return None
+        brace_start = text.find("{", start)
+        if brace_start < 0:
+            return None
+        depth = 0
+        for idx in range(brace_start, len(text)):
+            char = text[idx]
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : idx + 1]
+        return None
+
+    def remove_boxed(boxed: str | None) -> str:
+        if boxed is None:
+            return ""
+        text = str(boxed).strip()
+        prefix = "\\boxed{"
+        if text.startswith(prefix) and text.endswith("}"):
+            return text[len(prefix) : -1]
+        return text
 
 
 DATA_SOURCE = "DigitalLearningGmbH/MATH-lighteval"
@@ -49,7 +78,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--source",
         choices=["hf", "verl_parquet"],
-        default="verl_parquet",
+        default="hf",
         help="Whether to build from the HF dataset directly or flatten existing verl parquet files.",
     )
     parser.add_argument(
@@ -59,12 +88,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--verl_data_dir",
-        default="/root/autodl-tmp/prm_grpo/data/verl_math",
+        default="data/verl_math",
         help="Directory containing existing verl train.parquet/test.parquet when --source=verl_parquet.",
     )
     parser.add_argument(
         "--local_save_dir",
-        default="/root/autodl-tmp/prm_grpo/data/trl_math",
+        default="data/trl_math",
         help="Directory where TRL parquet files will be written.",
     )
     parser.add_argument(

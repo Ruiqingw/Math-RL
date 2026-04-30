@@ -429,7 +429,77 @@ The smoke passes only when `<extra_0>` is one token after setup, label
 positions match `<extra_0>` positions, and a tiny CPU token-classification
 forward returns one score per step.
 
-Current server note from 2026-05-01: `models/Qwen2.5-Math-1.5B-Instruct`
-exists but still has a `._____temp/` download directory, so rerun the policy
-model download before using it. `models/Qwen2.5-Math-7B-Instruct` still needs to
-be downloaded.
+Current server note from 2026-05-01: both required ModelScope models were
+re-downloaded into repository-local paths and passed local config/tokenizer
+load checks:
+
+```text
+models/Qwen2.5-Math-1.5B-Instruct qwen2 ['Qwen2ForCausalLM']
+models/Qwen2.5-Math-7B-Instruct qwen2 ['Qwen2ForCausalLM']
+```
+
+Do not reuse PRM checkpoints from the old `/root/autodl-tmp/prm_grpo` server
+path. The active extra0 PRM checkpoint path is reserved for a fresh run:
+
+```text
+token_prm_runs/extra0-prm/final
+```
+
+## Local Data Preparation
+
+PRM training data is prepared from the raw OpenAI PRM800K JSONL files under the
+repository-local path:
+
+```text
+data/prm800k_raw/prm800k/prm800k/data
+```
+
+The current mainline cache uses `raw_phase1_phase2 + all-steps` and the
+`rating >= 0 -> positive` label policy:
+
+```bash
+PYTHONNOUSERSITE=1 $PY - <<'PY'
+from scripts.verifier.openai_prm_raw import build_raw_phase1_phase2_dataset
+
+ds = build_raw_phase1_phase2_dataset(
+    raw_data_dir="data/prm800k_raw/prm800k/prm800k/data",
+    cache_dir="data/datasets/prm800k_openai_phase1_phase2_stepwise_nonneg_allsteps",
+    neutral_policy="nonnegative",
+    stop_at_first_negative=False,
+)
+print({split: len(rows) for split, rows in ds.items()})
+PY
+```
+
+Verified 2026-05-01:
+
+```text
+{'train': 487315, 'test': 13451}
+```
+
+TRL MATH data is regenerated from `DigitalLearningGmbH/MATH-lighteval` into:
+
+```text
+data/trl_math/train.parquet
+data/trl_math/test.parquet
+```
+
+If direct Hugging Face access fails with SSL EOF through the proxy, retry from
+the same proxy shell with:
+
+```bash
+HF_ENDPOINT=https://hf-mirror.com PYTHONNOUSERSITE=1 $PY \
+  scripts/trl/prepare_trl_math_data.py --source hf --local_save_dir data/trl_math
+```
+
+Verified 2026-05-01:
+
+```text
+{'train': 7500, 'test': 5000}
+```
+
+Current GPU note from 2026-05-01: the active shell cannot see GPUs
+(`torch.cuda.is_available() == False`, `torch.cuda.device_count() == 0`, and
+`nvidia-smi` is not on `PATH`). Do not start fresh 7B PRM LoRA training or GRPO
+until the server session exposes the intended GPUs again. Re-run the W&B smoke
+from the same proxy/env shell immediately before the long training command.

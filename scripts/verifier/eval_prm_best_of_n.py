@@ -95,17 +95,10 @@ from qwen_extra0_prm import (  # noqa: E402
 )
 
 
-DEFAULT_MODEL_PATH = "/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B-Instruct"
-DEFAULT_VERIFIER_MODEL_PATH = (
-    "/root/autodl-tmp/prm_grpo/token_prm_runs/"
-    "prm-token-fullft-phase2raw-nonneg-firsterr-eval12-negw10p0-focalg2p0-qwen25-math-1.5b/"
-    "final"
-)
-DEFAULT_DATA_DIR = "/root/autodl-tmp/prm_grpo/data/trl_math"
-DEFAULT_OUTPUT_JSONL = (
-    "/root/autodl-tmp/prm_grpo/outputs/prm_best_of_n/"
-    "math_test_100_best_of_16.jsonl"
-)
+DEFAULT_MODEL_PATH = "models/Qwen2.5-Math-1.5B-Instruct"
+DEFAULT_VERIFIER_MODEL_PATH = "token_prm_runs/extra0-prm/final"
+DEFAULT_DATA_DIR = "data/trl_math"
+DEFAULT_OUTPUT_JSONL = "outputs/prm_best_of_n/math_test_100_best_of_16.jsonl"
 DEFAULT_INSTRUCTION = (
     "Let's solve step by step. Separate each reasoning step with a blank line, "
     "then give the final answer in \\boxed{}."

@@ -24,8 +24,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from datasets import DatasetDict, concatenate_datasets, load_dataset, load_from_disk
 
 
-DEFAULT_RAW_DATA_DIR = "/root/autodl-tmp/prm_grpo/prm800k_raw/prm800k/data"
-DEFAULT_CACHE_ROOT = "/root/autodl-tmp/prm_grpo/datasets"
+DEFAULT_RAW_DATA_DIR = "data/prm800k_raw/prm800k/prm800k/data"
+DEFAULT_CACHE_ROOT = "data/datasets"
 
 
 def raw_phase_cache_dir(

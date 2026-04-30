@@ -7,9 +7,9 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 
-MODEL_PATH="${MODEL_PATH:-/root/autodl-tmp/prm_grpo/models/Qwen2.5-Math-1.5B-Instruct}"
-DATA_DIR="${DATA_DIR:-/root/autodl-tmp/prm_grpo/data/trl_math}"
-OUTPUT_DIR="${OUTPUT_DIR:-/root/autodl-tmp/prm_grpo/outputs/trl_grpo_math_instruct_verifier}"
+MODEL_PATH="${MODEL_PATH:-models/Qwen2.5-Math-1.5B-Instruct}"
+DATA_DIR="${DATA_DIR:-data/trl_math}"
+OUTPUT_DIR="${OUTPUT_DIR:-outputs/trl_grpo_math_instruct_verifier}"
 RUN_NAME="${RUN_NAME:-trl-grpo-math-instruct-verifier}"
 
 TRAIN_MAX_SAMPLES="${TRAIN_MAX_SAMPLES:-7500}"
@@ -35,7 +35,7 @@ USE_VLLM="${USE_VLLM:-1}"
 VLLM_MODE="${VLLM_MODE:-colocate}"
 VLLM_GPU_MEMORY_UTILIZATION="${VLLM_GPU_MEMORY_UTILIZATION:-0.3}"
 
-VERIFIER_MODEL_PATH="${VERIFIER_MODEL_PATH:-/root/autodl-tmp/prm_grpo/token_prm_runs/prm-token-fullft-phase1phase2raw-nonneg-allsteps-eval12-negw3p0-focalg2p0-qwen25-math-1.5b/checkpoint-9000}"
+VERIFIER_MODEL_PATH="${VERIFIER_MODEL_PATH:-token_prm_runs/extra0-prm/final}"
 VERIFIER_BACKEND="${VERIFIER_BACKEND:-auto}"
 VERIFIER_DEVICE="${VERIFIER_DEVICE:-cuda}"
 VERIFIER_MAX_LENGTH="${VERIFIER_MAX_LENGTH:-1024}"

@@ -78,10 +78,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL_PATH = "models/Qwen2.5-Math-7B-Instruct"
 DEFAULT_OUTPUT_ROOT = "token_prm_runs"
 DEFAULT_WANDB_PROJECT = "math_rl_extra0_prm"
-DEFAULT_BEST_OF_N_REUSE_JSONL = (
-    "/root/autodl-tmp/prm_grpo/outputs/prm_best_of_n/"
-    "math_test_100_best_of_16.jsonl"
-)
+DEFAULT_BEST_OF_N_REUSE_JSONL = "outputs/prm_best_of_n/math_test_100_best_of_16.jsonl"
 
 
 def split_csv(value: str) -> List[str]:
@@ -105,7 +102,7 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--dataset-source", choices=["raw_phase1_phase2", "raw_phase2"], default="raw_phase1_phase2")
     parser.add_argument("--raw-data-dir", default=DEFAULT_RAW_DATA_DIR)
-    parser.add_argument("--dataset-cache-root", default="/root/autodl-tmp/prm_grpo/datasets")
+    parser.add_argument("--dataset-cache-root", default="data/datasets")
     parser.add_argument("--force-rebuild-dataset", action="store_true")
     parser.add_argument("--neutral-policy", choices=["nonnegative", "positive_only"], default="nonnegative")
     parser.add_argument("--stop-at-first-negative", type=str2bool, default=False)
@@ -966,10 +963,13 @@ def main() -> None:
 
     logger.info("Starting extra0 PRM training...")
     trainer.train()
+    final_dir = os.path.join(output_dir, "final")
+    trainer.save_model(final_dir)
     trainer._prune_checkpoints_to_best_only()
     logger.info(
-        "Training complete. best_checkpoint=%s save_total_limit=%s",
+        "Training complete. best_checkpoint=%s final_dir=%s save_total_limit=%s",
         trainer.state.best_model_checkpoint,
+        final_dir,
         args.save_total_limit,
     )
     if wandb is not None and wandb.run is not None:

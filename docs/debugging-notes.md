@@ -188,3 +188,47 @@ Runtime and setup issues are recorded here in chronological order.
 - final fix: blocked. Do not start offline reranking, PRM training, or GRPO
   until GPU visibility and required artifacts/permissions are restored.
 - verification status: blocked at the fixed-candidate offline reranking task.
+
+## 2026-05-01 - Direct Hugging Face dataset download failed through proxy
+
+- command or script:
+  `scripts/trl/prepare_trl_math_data.py --source hf --local_save_dir data/trl_math`
+  from the proxy shell.
+- environment details: repository `/Work21/2024/luyuheng/Math-RL`, conda env
+  `math-rl`, mihomo proxy sourced from
+  `/Work21/2024/luyuheng/Log-TIR/mihomo-server-proxy`.
+- error message or symptom:
+  `SSLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol'))`
+  while requesting `https://huggingface.co/datasets/DigitalLearningGmbH/MATH-lighteval/...`.
+- root cause if known: direct Hugging Face access through the current proxy
+  path was unstable.
+- attempted fixes: let the Hugging Face client complete its five retries, then
+  retried from the same proxy/env shell with `HF_ENDPOINT=https://hf-mirror.com`.
+- final fix: the mirror retry completed and wrote
+  `data/trl_math/train.parquet` and `data/trl_math/test.parquet`.
+- verification status: verified by loading both parquet files with
+  `datasets.load_dataset`, yielding `{'train': 7500, 'test': 5000}`.
+
+## 2026-05-01 - Fresh PRM training blocked by missing GPU visibility
+
+- command or script:
+  - `python -c "import torch; print(torch.cuda.is_available(), torch.cuda.device_count())"`
+  - `nvidia-smi --query-gpu=index,name,memory.total,driver_version --format=csv,noheader`
+  - `ls -d /proc/driver/nvidia/gpus`
+- environment details: repository `/Work21/2024/luyuheng/Math-RL`, conda env
+  `math-rl`, after successful ModelScope model re-download and local data
+  rebuild.
+- error message or symptom:
+  - PyTorch reports `cuda_available False` and `device_count 0`.
+  - `nvidia-smi` is not on `PATH`.
+  - `/proc/driver/nvidia/gpus` is absent.
+- root cause if known: the current shell/session does not expose the server
+  GPUs.
+- attempted fixes: rechecked CUDA through PyTorch, `nvidia-smi`, and
+  `/proc/driver/nvidia/gpus`; verified that model/data/W&B prerequisites are
+  otherwise available.
+- final fix: status open. Do not start the requested fresh
+  `Qwen2.5-Math-7B-Instruct` LoRA PRM training, fixed-candidate generation, or
+  GRPO until a GPU-visible session is available.
+- verification status: blocked; this is now the remaining resource blocker for
+  the Phase 6 offline reranking queue item.
