@@ -10,6 +10,11 @@ from typing import Any
 import requests
 
 try:
+    import wandb
+except ImportError:  # pragma: no cover
+    wandb = None
+
+try:
     from verl.utils.reward_score.math_reward import compute_score, last_boxed_only_string, remove_boxed
 except ModuleNotFoundError:
     try:
@@ -83,6 +88,10 @@ VERIFIER_BACKEND_IDS = {
     "extra0_token_cls": 3.0,
     "extra0_server": 4.0,
 }
+REWARD_MODE_IDS = {
+    "wrong_only": 1.0,
+    "all_wrong_tiebreak": 2.0,
+}
 
 
 _CACHED_VERIFIER: dict[str, Any] = {
@@ -131,6 +140,13 @@ def _std(values: list[float]) -> float:
         return 0.0
     mean = _mean(values)
     return float((sum((value - mean) ** 2 for value in values) / len(values)) ** 0.5)
+
+
+def _set_wandb_summary(values: dict[str, Any]) -> None:
+    if wandb is None or wandb.run is None:
+        return
+    for key, value in values.items():
+        wandb.run.summary[key] = value
 
 
 def math_boxed_reward(prompts, completions, gold_answer, **kwargs):
@@ -251,8 +267,10 @@ def _score_steps_extra0_server_batch(
 
     metrics = {
         "reward_server/request_count": float(payload.get("request_count", 0.0)),
-        "reward_server/batch_size": float(payload.get("batch_size", len(items))),
-        "reward_server/latency_ms": float(payload.get("latency_ms", 0.0)),
+        "reward_server/batch_size_mean": float(payload.get("batch_size", len(items))),
+        "reward_server/latency_ms_mean": float(payload.get("latency_ms", 0.0)),
+        "reward_server/latency_ms_p95": float(payload.get("latency_ms", 0.0)),
+        "reward_server/error_count": float(payload.get("error_count", 0.0)),
     }
     return [[float(score) for score in result.get("step_scores", [])] for result in scores], metrics
 
@@ -281,6 +299,16 @@ def verifier_shaping_reward(
         verifier_model_path,
         verifier_device,
         verifier_backend,
+    )
+    reward_mode = "all_wrong_tiebreak" if verifier_tiebreak_only else "wrong_only"
+    _set_wandb_summary(
+        {
+            "reward/backend": backend,
+            "reward/mode": reward_mode,
+            "reward/beta": float(verifier_beta),
+            "reward/prm_model_path": verifier_model_path,
+            "reward/prm_aggregation": "min",
+        }
     )
     log_metric = kwargs.get("log_metric")
     rewards = []
@@ -433,6 +461,12 @@ def verifier_shaping_reward(
 
         if log_metric is not None and total_groups > 0:
             wrong_sample_count = sum(1 for is_correct in base_correct_flags if not is_correct)
+            base_reward_values = [1.0 if is_correct else 0.0 for is_correct in base_correct_flags]
+            final_shaping_rewards = gated_rewards if verifier_tiebreak_only else rewards
+            wrong_shaping_rewards = [
+                reward for reward, is_correct in zip(final_shaping_rewards, base_correct_flags) if not is_correct
+            ]
+            shaping_nonzero_count = sum(1 for reward in final_shaping_rewards if abs(reward) > 1e-12)
             valid_scores = [score for score in prm_scores_by_sample if score is not None]
             correct_scores = [
                 score
@@ -445,6 +479,9 @@ def verifier_shaping_reward(
                 if score is not None and not is_correct
             ]
             log_metric("verifier_shaping_reward/backend_id", VERIFIER_BACKEND_IDS[backend])
+            log_metric("reward/backend", VERIFIER_BACKEND_IDS[backend])
+            log_metric("reward/mode", REWARD_MODE_IDS[reward_mode])
+            log_metric("reward/beta", float(verifier_beta))
             log_metric(
                 "verifier_shaping_reward/backend_is_extra0_token_cls",
                 1.0 if backend == "extra0_token_cls" else 0.0,
@@ -460,6 +497,24 @@ def verifier_shaping_reward(
             log_metric("math_boxed_reward/mixed_group_frac", float(mixed_groups / total_groups))
             log_metric("math_boxed_reward/all_correct_group_frac", float(all_correct_groups / total_groups))
             log_metric("math_boxed_reward/wrong_sample_frac", float(wrong_sample_count / len(base_correct_flags)))
+            log_metric("reward/base_accuracy", _mean(base_reward_values))
+            log_metric("reward/base_reward_mean", _mean(base_reward_values))
+            log_metric("reward/base_reward_std", _std(base_reward_values))
+            log_metric("reward/all_wrong_group_frac", float(all_wrong_groups / total_groups))
+            log_metric("reward/mixed_group_frac", float(mixed_groups / total_groups))
+            log_metric("reward/all_correct_group_frac", float(all_correct_groups / total_groups))
+            log_metric("reward/wrong_sample_frac", float(wrong_sample_count / len(base_correct_flags)))
+            log_metric("reward/prm_score_mean", _mean(valid_scores))
+            log_metric("reward/prm_score_std", _std(valid_scores))
+            log_metric("reward/prm_score_correct_mean", _mean(correct_scores))
+            log_metric("reward/prm_score_wrong_mean", _mean(wrong_scores))
+            log_metric("reward/prm_score_correct_std", _std(correct_scores))
+            log_metric("reward/prm_score_wrong_std", _std(wrong_scores))
+            log_metric("reward/shaping_mean", _mean(final_shaping_rewards))
+            log_metric("reward/shaping_std", _std(final_shaping_rewards))
+            log_metric("reward/shaping_nonzero_frac", float(shaping_nonzero_count / len(final_shaping_rewards)))
+            log_metric("reward/wrong_shaping_mean", _mean(wrong_shaping_rewards))
+            log_metric("reward/wrong_shaping_std", _std(wrong_shaping_rewards))
             if min_step_scores:
                 log_metric(
                     "verifier_shaping_reward/min_step_score_mean",

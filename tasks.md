@@ -221,7 +221,7 @@ The intended mainline is:
   - Log PRM score mean/std for correct samples and wrong samples separately.
   - Log how often PRM shaping changes within-group ranking among wrong samples.
 
-- [ ] Add a W&B metric contract for GRPO reward runs.
+- [x] Add a W&B metric contract for GRPO reward runs.
   - Log reward identity/config:
     - `reward/backend`
     - `reward/mode`

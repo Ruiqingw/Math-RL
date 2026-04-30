@@ -54,6 +54,7 @@ class ScoreResponse(BaseModel):
     request_count: int
     batch_size: int
     latency_ms: float
+    error_count: int
 
 
 class HealthResponse(BaseModel):
@@ -135,6 +136,7 @@ def score(request: ScoreRequest) -> ScoreResponse:
         request_count=STATE.request_count,
         batch_size=len(request.items),
         latency_ms=latency_ms,
+        error_count=STATE.error_count,
     )
 
 

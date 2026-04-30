@@ -290,6 +290,12 @@ wrong sample fraction; PRM score mean/std split by final-answer correctness; and
 the fraction of groups where PRM shaping changes the ranking among multiple
 wrong samples.
 
+The GRPO reward W&B contract uses `reward/*` for backend identity, reward mode,
+beta, base accuracy/reward statistics, group composition, PRM score behavior,
+and shaping behavior. Server-backed runs also log `reward_server/request_count`,
+`reward_server/batch_size_mean`, `reward_server/latency_ms_mean`,
+`reward_server/latency_ms_p95`, and `reward_server/error_count`.
+
 ## Model Directory
 
 Base models should be downloaded into the repository-local `models/` directory.
