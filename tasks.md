@@ -294,7 +294,7 @@ The intended mainline is:
 
 ## Phase 6: Validation Plan
 
-- [ ] Run lightweight syntax/import checks after code changes.
+- [x] Run lightweight syntax/import checks after code changes.
   - Check new modules compile.
   - Check modified reward scripts import without loading full models where
     possible.
