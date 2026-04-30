@@ -197,6 +197,25 @@ wandb_connectivity=ok
 If this fails before a long run, do not start training. Fix W&B login or network
 first.
 
+## Extra0 PRM W&B Metrics
+
+`scripts/verifier/train_qwen_extra0_prm.py` records the extra0 PRM training
+contract under these key families:
+
+- `extra0/train_loss` and `extra0/eval_*` for step-level loss, accuracy,
+  balanced accuracy, negative AUROC, and negative average precision.
+- `extra0/train_*`, `extra0/eval_*`, and `extra0/dropped_label_frac` for label
+  counts, natural negative fractions, `<extra_0>` positions, truncation, and
+  dropped supervision.
+- `extra0/neg_loss_weight`, `extra0/focal_gamma`,
+  `extra0/effective_neg_weight_share`, `extra0/rebalance_mode`,
+  `extra0/base_model`, `extra0/tuning_mode`, `extra0/lora_r`,
+  `extra0/lora_alpha`, `extra0/best_checkpoint`,
+  `extra0/best_metric_name`, and `extra0/save_total_limit` for run metadata.
+- `best_of_n/reference_*` and `best_of_n/*` for fixed-candidate reranking
+  references, PRM best-of-16 accuracy, gaps vs greedy/majority, misranking
+  fraction, and correct/wrong candidate score means.
+
 ## Model Directory
 
 Base models should be downloaded into the repository-local `models/` directory.

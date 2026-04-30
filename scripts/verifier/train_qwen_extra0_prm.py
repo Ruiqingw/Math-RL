@@ -14,6 +14,7 @@ Default mainline:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import math
 import os
@@ -54,7 +55,9 @@ from qwen_extra0_prm import (  # noqa: E402
     Extra0PadCollator,
     build_extra0_token_classification_encoding,
     resolve_extra0_token_id,
+    score_steps as score_steps_extra0,
 )
+from step_splitter import split_into_steps  # noqa: E402
 
 try:
     import wandb
@@ -73,6 +76,10 @@ logger = logging.getLogger(__name__)
 DEFAULT_MODEL_PATH = "models/Qwen2.5-Math-7B-Instruct"
 DEFAULT_OUTPUT_ROOT = "token_prm_runs"
 DEFAULT_WANDB_PROJECT = "math_rl_extra0_prm"
+DEFAULT_BEST_OF_N_REUSE_JSONL = (
+    "/root/autodl-tmp/prm_grpo/outputs/prm_best_of_n/"
+    "math_test_100_best_of_16.jsonl"
+)
 
 
 def split_csv(value: str) -> List[str]:
@@ -139,6 +146,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wandb-project", default=DEFAULT_WANDB_PROJECT)
     parser.add_argument("--report-to", default="wandb")
     parser.add_argument("--seed", type=int, default=42)
+
+    parser.add_argument("--best-of-n-reuse-jsonl", default=DEFAULT_BEST_OF_N_REUSE_JSONL)
+    parser.add_argument("--best-of-n-eval-max-samples", type=int, default=100)
+    parser.add_argument("--best-of-n-prm-aggregation", choices=["mean_log", "sum_log", "mean", "min"], default="min")
+    parser.add_argument("--best-of-n-verifier-max-length", type=int, default=1024)
     return parser.parse_args()
 
 
@@ -156,6 +168,90 @@ def run_name_from_args(args: argparse.Namespace) -> str:
     negw = str(args.neg_loss_weight).replace(".", "p")
     gamma = str(args.focal_gamma).replace(".", "p")
     return f"extra0-prm-{tuning}-{dataset_tag(args)}-negw{negw}-focalg{gamma}"
+
+
+def aggregate_step_scores(step_scores: Sequence[float], mode: str) -> float:
+    if not step_scores:
+        return float("-inf")
+    if mode == "mean":
+        return float(sum(step_scores) / len(step_scores))
+    if mode == "min":
+        return float(min(step_scores))
+
+    clamped = [min(max(float(score), 1e-6), 1.0) for score in step_scores]
+    log_scores = [math.log(score) for score in clamped]
+    if mode == "sum_log":
+        return float(sum(log_scores))
+    if mode == "mean_log":
+        return float(sum(log_scores) / len(log_scores))
+    raise ValueError(f"Unsupported PRM aggregation: {mode}")
+
+
+def load_fixed_best_of_n_eval(args: argparse.Namespace) -> Optional[dict]:
+    path = args.best_of_n_reuse_jsonl
+    if not path:
+        logger.warning("Fixed best-of-N eval JSONL is disabled.")
+        return None
+    if not os.path.exists(path):
+        logger.warning("Fixed best-of-N eval JSONL was not found, skipping rerank metrics: %s", path)
+        return None
+
+    examples: List[Dict[str, Any]] = []
+    greedy_correct: List[float] = []
+    majority_correct: List[float] = []
+    oracle_correct: List[float] = []
+    num_generations: List[int] = []
+
+    with open(path, "r", encoding="utf-8") as reader:
+        for line_idx, line in enumerate(reader):
+            if args.best_of_n_eval_max_samples is not None and line_idx >= args.best_of_n_eval_max_samples:
+                break
+            row = json.loads(line)
+            sampled = row.get("sampled", [])
+            candidates = [
+                {
+                    "text": str(sample.get("text", "")),
+                    "math_correct": float(sample.get("math_correct", 0.0) or 0.0),
+                }
+                for sample in sampled
+            ]
+            if not candidates:
+                continue
+            examples.append(
+                {
+                    "problem": str(row.get("problem", "")),
+                    "gold_answer": str(row.get("gold_answer", "")),
+                    "candidates": candidates,
+                }
+            )
+            greedy_correct.append(float(row.get("greedy_correct", 0.0) or 0.0))
+            majority_correct.append(float(row.get("majority_correct", 0.0) or 0.0))
+            oracle_correct.append(float(row.get("sample_oracle_correct", max(candidate["math_correct"] for candidate in candidates)) or 0.0))
+            num_generations.append(len(candidates))
+
+    if not examples:
+        logger.warning("Fixed best-of-N eval JSONL had no usable candidate rows: %s", path)
+        return None
+
+    reference_metrics = {
+        "best_of_n/reference_greedy_accuracy": float(np.mean(greedy_correct)) if greedy_correct else 0.0,
+        "best_of_n/reference_majority_vote_accuracy": float(np.mean(majority_correct)) if majority_correct else 0.0,
+        "best_of_n/reference_sample_oracle_accuracy": float(np.mean(oracle_correct)) if oracle_correct else 0.0,
+    }
+    logger.info(
+        "Loaded fixed best-of-N eval set: jsonl=%s examples=%s mean_candidates=%.1f greedy=%.4f majority=%.4f oracle=%.4f aggregation=%s",
+        path,
+        f"{len(examples):,}",
+        float(np.mean(num_generations)) if num_generations else 0.0,
+        reference_metrics["best_of_n/reference_greedy_accuracy"],
+        reference_metrics["best_of_n/reference_majority_vote_accuracy"],
+        reference_metrics["best_of_n/reference_sample_oracle_accuracy"],
+        args.best_of_n_prm_aggregation,
+    )
+    return {
+        "examples": examples,
+        "reference_metrics": reference_metrics,
+    }
 
 
 def load_training_dataset(args: argparse.Namespace):
@@ -393,6 +489,117 @@ class Extra0PRMTrainer(Trainer):
         super()._save_checkpoint(*args, **kwargs)
         self._prune_checkpoints_to_best_only()
 
+    def log(self, logs: Dict[str, float], *args, **kwargs) -> None:
+        aliased_logs = dict(logs)
+        metric_aliases = {
+            "loss": "extra0/train_loss",
+            "train_loss": "extra0/train_loss",
+            "eval_loss": "extra0/eval_loss",
+            "eval_accuracy": "extra0/eval_accuracy",
+            "eval_pos_accuracy": "extra0/eval_pos_accuracy",
+            "eval_neg_accuracy": "extra0/eval_neg_accuracy",
+            "eval_balanced_accuracy": "extra0/eval_balanced_accuracy",
+            "eval_pred_neg_fraction": "extra0/eval_pred_neg_fraction",
+            "eval_neg_auroc": "extra0/eval_neg_auroc",
+            "eval_neg_average_precision": "extra0/eval_neg_average_precision",
+        }
+        for source_key, target_key in metric_aliases.items():
+            if source_key in aliased_logs and target_key not in aliased_logs:
+                aliased_logs[target_key] = aliased_logs[source_key]
+        return super().log(aliased_logs, *args, **kwargs)
+
+    def _evaluate_best_of_n_metric(self) -> Dict[str, float]:
+        best_of_n_eval = getattr(self, "_best_of_n_eval", None)
+        if not best_of_n_eval:
+            return {}
+
+        model = self.model.module if hasattr(self.model, "module") else self.model
+        tokenizer = getattr(self, "processing_class", None) or self.tokenizer
+        was_training = model.training
+        device = str(self.args.device)
+
+        selected_correct: List[float] = []
+        correct_candidate_scores: List[float] = []
+        wrong_candidate_scores: List[float] = []
+        solvable_group_count = 0
+        misranking_count = 0
+
+        model.eval()
+        try:
+            for example in best_of_n_eval["examples"]:
+                candidates = example["candidates"]
+                scored_candidates: List[float] = []
+                candidate_correctness = [float(candidate["math_correct"]) for candidate in candidates]
+                for candidate in candidates:
+                    steps = split_into_steps(candidate["text"])
+                    step_scores = score_steps_extra0(
+                        example["problem"],
+                        steps,
+                        model,
+                        tokenizer,
+                        device=device,
+                        max_length=self._best_of_n_verifier_max_length,
+                        require_all_steps=False,
+                    )
+                    score = aggregate_step_scores(step_scores, self._best_of_n_prm_aggregation)
+                    scored_candidates.append(score)
+                    if math.isfinite(score):
+                        if candidate["math_correct"] >= 0.5:
+                            correct_candidate_scores.append(score)
+                        else:
+                            wrong_candidate_scores.append(score)
+
+                best_idx = max(range(len(scored_candidates)), key=lambda idx: scored_candidates[idx])
+                best_correct = candidate_correctness[best_idx]
+                selected_correct.append(best_correct)
+                if any(correctness >= 0.5 for correctness in candidate_correctness):
+                    solvable_group_count += 1
+                    if best_correct < 0.5:
+                        misranking_count += 1
+        finally:
+            if was_training:
+                model.train()
+
+        prm_best_acc = float(np.mean(selected_correct)) if selected_correct else 0.0
+        ref = best_of_n_eval["reference_metrics"]
+        return {
+            "best_of_n/prm_best_of_16_accuracy": prm_best_acc,
+            "best_of_n/vs_greedy_gap": prm_best_acc - ref["best_of_n/reference_greedy_accuracy"],
+            "best_of_n/vs_majority_gap": prm_best_acc - ref["best_of_n/reference_majority_vote_accuracy"],
+            "best_of_n/misranking_frac": (
+                float(misranking_count / solvable_group_count) if solvable_group_count else 0.0
+            ),
+            "best_of_n/candidate_correct_score_mean": (
+                float(np.mean(correct_candidate_scores)) if correct_candidate_scores else 0.0
+            ),
+            "best_of_n/candidate_wrong_score_mean": (
+                float(np.mean(wrong_candidate_scores)) if wrong_candidate_scores else 0.0
+            ),
+        }
+
+    def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix: str = "eval"):
+        metrics = super().evaluate(
+            eval_dataset=eval_dataset,
+            ignore_keys=ignore_keys,
+            metric_key_prefix=metric_key_prefix,
+        )
+
+        if not self.is_world_process_zero():
+            return metrics
+
+        best_of_n_metrics = self._evaluate_best_of_n_metric()
+        if best_of_n_metrics:
+            logger.info(
+                "Fixed best-of-N eval: prm_best_of_16_accuracy=%.4f vs_greedy=%.4f vs_majority=%.4f misranking=%.4f",
+                best_of_n_metrics["best_of_n/prm_best_of_16_accuracy"],
+                best_of_n_metrics["best_of_n/vs_greedy_gap"],
+                best_of_n_metrics["best_of_n/vs_majority_gap"],
+                best_of_n_metrics["best_of_n/misranking_frac"],
+            )
+            metrics.update(best_of_n_metrics)
+            self.log(best_of_n_metrics)
+        return metrics
+
 
 def _softmax_np(logits: np.ndarray) -> np.ndarray:
     shifted = logits - logits.max(axis=-1, keepdims=True)
@@ -470,6 +677,9 @@ def log_dataset_stats(train_ds: Extra0PRMDataset, eval_ds: Extra0PRMDataset, arg
         train_ds.stats.neg_count,
         args.neg_loss_weight,
     )
+    metrics["extra0/lora_r"] = float(args.lora_r if args.use_lora else 0)
+    metrics["extra0/lora_alpha"] = float(args.lora_alpha if args.use_lora else 0)
+    metrics["extra0/save_total_limit"] = float(args.save_total_limit)
 
     logger.info(
         "Extra0 dataset stats: train_rows=%s train_pos=%s train_neg=%s train_extra0_mean=%.2f train_trunc=%.4f "
@@ -493,6 +703,32 @@ def effective_neg_weight_share(pos_count: int, neg_count: int, neg_loss_weight: 
     weighted_neg = neg_count * neg_loss_weight
     total = pos_count + weighted_neg
     return float(weighted_neg / total) if total else 0.0
+
+
+def update_wandb_contract_summary(
+    args: argparse.Namespace,
+    training_args: TrainingArguments,
+    *,
+    extra0_token_id: int,
+    fixed_best_of_n_eval: Optional[dict],
+) -> None:
+    if wandb is None or wandb.run is None:
+        return
+
+    summary = {
+        "extra0/base_model": args.model_path,
+        "extra0/tuning_mode": "lora" if args.use_lora else "full",
+        "extra0/lora_r": args.lora_r if args.use_lora else 0,
+        "extra0/lora_alpha": args.lora_alpha if args.use_lora else 0,
+        "extra0/rebalance_mode": args.rebalance_mode,
+        "extra0/save_total_limit": args.save_total_limit,
+        "extra0/extra0_token_id": extra0_token_id,
+        "extra0/best_metric_name": training_args.metric_for_best_model,
+    }
+    if fixed_best_of_n_eval is not None:
+        summary.update(fixed_best_of_n_eval["reference_metrics"])
+    for key, value in summary.items():
+        wandb.run.summary[key] = value
 
 
 def build_lora_config(args: argparse.Namespace) -> LoraConfig:
@@ -569,6 +805,7 @@ def main() -> None:
         raise ValueError(f"Empty train/eval dataset after encoding: train={len(train_ds)} eval={len(eval_ds)}")
 
     data_metrics = log_dataset_stats(train_ds, eval_ds, args)
+    fixed_best_of_n_eval = load_fixed_best_of_n_eval(args)
     samples_per_optimizer_step = args.per_device_train_batch_size * args.gradient_accumulation_steps
     uncapped_steps = int(math.ceil((len(train_ds) * args.num_train_epochs) / samples_per_optimizer_step))
     logger.info(
@@ -626,14 +863,18 @@ def main() -> None:
     )
     trainer._neg_loss_weight = args.neg_loss_weight
     trainer._focal_gamma = args.focal_gamma
+    trainer._best_of_n_eval = fixed_best_of_n_eval
+    trainer._best_of_n_prm_aggregation = args.best_of_n_prm_aggregation
+    trainer._best_of_n_verifier_max_length = args.best_of_n_verifier_max_length
     trainer.log(data_metrics)
-    if wandb is not None and wandb.run is not None:
-        wandb.run.summary["extra0/base_model"] = args.model_path
-        wandb.run.summary["extra0/tuning_mode"] = "lora" if args.use_lora else "full"
-        wandb.run.summary["extra0/lora_r"] = args.lora_r if args.use_lora else 0
-        wandb.run.summary["extra0/lora_alpha"] = args.lora_alpha if args.use_lora else 0
-        wandb.run.summary["extra0/save_total_limit"] = args.save_total_limit
-        wandb.run.summary["extra0/extra0_token_id"] = extra0_token_id
+    if fixed_best_of_n_eval is not None:
+        trainer.log(fixed_best_of_n_eval["reference_metrics"])
+    update_wandb_contract_summary(
+        args,
+        training_args,
+        extra0_token_id=extra0_token_id,
+        fixed_best_of_n_eval=fixed_best_of_n_eval,
+    )
 
     logger.info("Starting extra0 PRM training...")
     trainer.train()

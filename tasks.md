@@ -113,7 +113,7 @@ The intended mainline is:
   - Store downloaded models under a local `models/` directory.
   - Keep paths configurable so server-local paths can differ from laptop paths.
 
-- [ ] Add a W&B metric contract for extra0 PRM training.
+- [x] Add a W&B metric contract for extra0 PRM training.
   - Log training/eval basics:
     - `extra0/train_loss`
     - `extra0/eval_loss`
