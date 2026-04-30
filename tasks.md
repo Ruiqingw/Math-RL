@@ -67,7 +67,7 @@ The intended mainline is:
 
 ## Phase 1: Add Extra0 PRM Core
 
-- [ ] Add server environment setup runbook.
+- [x] Add server environment setup runbook.
   - Create or update a Markdown runbook under `docs/`, such as
     `docs/server-setup.md`.
   - Create a conda environment named `math-rl`.
