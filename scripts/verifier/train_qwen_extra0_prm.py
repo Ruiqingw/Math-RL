@@ -54,7 +54,9 @@ from qwen_extra0_prm import (  # noqa: E402
     POSITIVE_LABEL,
     Extra0PadCollator,
     build_extra0_token_classification_encoding,
+    ensure_extra0_token,
     resolve_extra0_token_id,
+    resize_token_embeddings_for_extra0,
     score_steps as score_steps_extra0,
 )
 from step_splitter import split_into_steps  # noqa: E402
@@ -813,13 +815,16 @@ def build_lora_config(args: argparse.Namespace) -> LoraConfig:
     )
 
 
-def prepare_model(args: argparse.Namespace):
+def prepare_model(args: argparse.Namespace, tokenizer, extra0_token_id: int):
     model = AutoModelForTokenClassification.from_pretrained(
         args.model_path,
         num_labels=2,
         trust_remote_code=True,
         torch_dtype=torch.bfloat16 if args.bf16 else torch.float16,
     )
+    resized = resize_token_embeddings_for_extra0(model, tokenizer, extra0_token_id)
+    if resized:
+        logger.info("Resized model token embeddings to %s for %s", len(tokenizer), EXTRA0_TOKEN)
     model.config.use_cache = False
     if args.use_lora:
         model = get_peft_model(model, build_lora_config(args))
@@ -850,10 +855,10 @@ def main() -> None:
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.truncation_side = "left"
-    extra0_token_id = resolve_extra0_token_id(tokenizer)
+    extra0_token_id = ensure_extra0_token(tokenizer)
     logger.info("Resolved %s token id: %s", EXTRA0_TOKEN, extra0_token_id)
 
-    model = prepare_model(args)
+    model = prepare_model(args, tokenizer, extra0_token_id)
     ds = load_training_dataset(args)
 
     eval_max_rows = args.eval_max_rows

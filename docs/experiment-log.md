@@ -19,3 +19,16 @@
 - verification status: active reward modules import without loading full models,
   entrypoint help commands start, the rollout-format debug script emits raw
   rollout text, three parsed steps, and inserted `<extra_0>` scoring input.
+
+## 2026-05-01 - Phase 6 synthetic extra0 scoring smoke
+
+- run name: `phase6-extra0-synthetic-smoke`
+- branch: `token-prm-openai-style`
+- environment details: conda env `math-rl`, tokenizer path
+  `models/Qwen2.5-Math-1.5B-Instruct`.
+- command or script:
+  `python scripts/verifier/smoke_extra0_synthetic.py --tokenizer-path models/Qwen2.5-Math-1.5B-Instruct`
+- result: passed after adding explicit `<extra_0>` token setup.
+- verification status: tokenizer has one `<extra_0>` token after setup, label
+  positions match `<extra_0>` positions, and a tiny CPU Qwen2
+  token-classification forward returned three scores for three steps.

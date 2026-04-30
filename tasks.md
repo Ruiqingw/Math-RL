@@ -299,7 +299,7 @@ The intended mainline is:
   - Check modified reward scripts import without loading full models where
     possible.
 
-- [ ] Run a tiny synthetic extra0 scoring smoke test.
+- [x] Run a tiny synthetic extra0 scoring smoke test.
   - Confirm the tokenizer contains `<extra_0>`.
   - Confirm label positions match `<extra_0>` positions.
   - Confirm one forward pass returns one score per step.

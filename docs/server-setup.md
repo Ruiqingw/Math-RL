@@ -415,21 +415,19 @@ for path in [
 PY
 ```
 
-For the extra0 PRM path, verify the tokenizer exposes the Qwen step marker:
+For the extra0 PRM path, run the synthetic protocol smoke after tokenizer
+downloads. Raw Qwen tokenizers may split `<extra_0>` into ordinary pieces; the
+active helper adds it as a special token and resizes model embeddings when
+needed.
 
 ```bash
-PYTHONNOUSERSITE=1 $PY - <<'PY'
-from transformers import AutoTokenizer
-
-tok = AutoTokenizer.from_pretrained(
-    "models/Qwen2.5-Math-7B-Instruct",
-    trust_remote_code=True,
-)
-extra0_id = tok.convert_tokens_to_ids("<extra_0>")
-print("extra0_id=", extra0_id)
-assert extra0_id != tok.unk_token_id
-PY
+PYTHONNOUSERSITE=1 $PY scripts/verifier/smoke_extra0_synthetic.py \
+  --tokenizer-path models/Qwen2.5-Math-1.5B-Instruct
 ```
+
+The smoke passes only when `<extra_0>` is one token after setup, label
+positions match `<extra_0>` positions, and a tiny CPU token-classification
+forward returns one score per step.
 
 Current server note from 2026-05-01: `models/Qwen2.5-Math-1.5B-Instruct`
 exists but still has a `._____temp/` download directory, so rerun the policy

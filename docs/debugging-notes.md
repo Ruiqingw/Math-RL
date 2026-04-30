@@ -139,3 +139,24 @@ Runtime and setup issues are recorded here in chronological order.
   JSONL before long GRPO runs.
 - verification status: verified. The synthetic smoke test prints raw rollout
   text, three parsed steps, and the matching `<extra_0>` scoring input.
+
+## 2026-05-01 - Raw Qwen tokenizer split `<extra_0>`
+
+- command or script:
+  `python scripts/verifier/smoke_extra0_synthetic.py --tokenizer-path models/Qwen2.5-Math-1.5B-Instruct`
+- environment details: conda env `math-rl`, local tokenizer files from
+  `models/Qwen2.5-Math-1.5B-Instruct`.
+- error message or symptom: `ValueError: Tokenizer does not contain
+  '<extra_0>' as a single token. Got encoded ids: [27, 15460, 62, 15, 29]`.
+- root cause if known: the raw Qwen tokenizer does not reserve `<extra_0>` as
+  a special token, but the extra0 PRM protocol needs one marker token position
+  per reasoning step.
+- attempted fixes: added `ensure_extra0_token(...)` and
+  `resize_token_embeddings_for_extra0(...)` in the shared extra0 helper, wired
+  them into PRM training, scoring, and synthetic smoke paths.
+- final fix: scripts add `<extra_0>` as a special token when needed and resize
+  token embeddings. Added marker embeddings are initialized from EOS so LoRA
+  runs can keep embeddings frozen.
+- verification status: verified. Synthetic smoke reported
+  `extra0_was_added=true`, three `<extra_0>` positions, matching label
+  positions, and three CPU forward scores.

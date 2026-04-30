@@ -85,6 +85,51 @@ def resolve_extra0_token_id(
     return int(token_id)
 
 
+def ensure_extra0_token(
+    tokenizer: PreTrainedTokenizerBase,
+    extra0_token: str = EXTRA0_TOKEN,
+) -> int:
+    """
+    Ensure ``extra0_token`` exists as a single special token and return its id.
+
+    Raw Qwen tokenizers may split ``<extra_0>`` into ordinary text pieces. The
+    PRM protocol needs one supervised marker position per reasoning step, so
+    training and smoke tests add the marker explicitly when needed.
+    """
+    try:
+        return resolve_extra0_token_id(tokenizer, extra0_token)
+    except ValueError:
+        tokenizer.add_tokens([extra0_token], special_tokens=True)
+        return resolve_extra0_token_id(tokenizer, extra0_token)
+
+
+def resize_token_embeddings_for_extra0(
+    model: torch.nn.Module,
+    tokenizer: PreTrainedTokenizerBase,
+    extra0_token_id: int,
+) -> bool:
+    """
+    Resize model embeddings for an added ``<extra_0>`` token when needed.
+
+    If the marker was appended to the tokenizer, initialize its embedding from
+    EOS. LoRA runs can then keep embeddings frozen and reproduce the same marker
+    embedding after resize at inference time.
+    """
+    input_embeddings = model.get_input_embeddings()
+    old_size = int(input_embeddings.num_embeddings)
+    new_size = len(tokenizer)
+    if old_size == new_size:
+        return False
+
+    eos_token_id = getattr(tokenizer, "eos_token_id", None)
+    model.resize_token_embeddings(new_size)
+    if extra0_token_id >= old_size and eos_token_id is not None and 0 <= int(eos_token_id) < old_size:
+        with torch.no_grad():
+            resized_embeddings = model.get_input_embeddings().weight
+            resized_embeddings[extra0_token_id].copy_(resized_embeddings[int(eos_token_id)])
+    return True
+
+
 def clean_step_text(step: str) -> str:
     text = str(step).strip()
     if not text:
@@ -241,7 +286,7 @@ def load_extra0_prm(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.truncation_side = "left"
-    extra0_token_id = resolve_extra0_token_id(tokenizer)
+    extra0_token_id = ensure_extra0_token(tokenizer)
 
     kwargs: Dict[str, Any] = {
         "num_labels": 2,
@@ -251,6 +296,7 @@ def load_extra0_prm(
     if device_map is not None:
         kwargs["device_map"] = device_map
     model = AutoModelForTokenClassification.from_pretrained(model_name_or_path, **kwargs)
+    resize_token_embeddings_for_extra0(model, tokenizer, extra0_token_id)
     model.eval()
     return model, tokenizer, extra0_token_id
 
@@ -280,7 +326,8 @@ def score_steps(
     if not steps:
         return []
 
-    extra0_token_id = resolve_extra0_token_id(tokenizer, extra0_token)
+    extra0_token_id = ensure_extra0_token(tokenizer, extra0_token)
+    resize_token_embeddings_for_extra0(model, tokenizer, extra0_token_id)
     dummy_labels = [POSITIVE_LABEL] * len(steps)
     encoding = build_extra0_token_classification_encoding(
         tokenizer,
@@ -307,4 +354,3 @@ def score_steps(
     outputs = model(input_ids=input_ids, attention_mask=attention_mask)
     step_logits = outputs.logits[0, encoding.extra0_positions, :]
     return torch.softmax(step_logits, dim=-1)[:, POSITIVE_LABEL].float().cpu().tolist()
-
