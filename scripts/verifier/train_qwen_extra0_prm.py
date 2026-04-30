@@ -628,19 +628,21 @@ class Extra0PRMTrainer(Trainer):
 
         prm_best_acc = float(np.mean(selected_correct)) if selected_correct else 0.0
         ref = best_of_n_eval["reference_metrics"]
+        vs_greedy_gap = prm_best_acc - ref["best_of_n/reference_greedy_accuracy"]
+        vs_majority_gap = prm_best_acc - ref["best_of_n/reference_majority_vote_accuracy"]
+        misranking_frac = float(misranking_count / solvable_group_count) if solvable_group_count else 0.0
+        correct_score_mean = float(np.mean(correct_candidate_scores)) if correct_candidate_scores else 0.0
+        wrong_score_mean = float(np.mean(wrong_candidate_scores)) if wrong_candidate_scores else 0.0
         return {
             "best_of_n/prm_best_of_16_accuracy": prm_best_acc,
-            "best_of_n/vs_greedy_gap": prm_best_acc - ref["best_of_n/reference_greedy_accuracy"],
-            "best_of_n/vs_majority_gap": prm_best_acc - ref["best_of_n/reference_majority_vote_accuracy"],
-            "best_of_n/misranking_frac": (
-                float(misranking_count / solvable_group_count) if solvable_group_count else 0.0
-            ),
-            "best_of_n/candidate_correct_score_mean": (
-                float(np.mean(correct_candidate_scores)) if correct_candidate_scores else 0.0
-            ),
-            "best_of_n/candidate_wrong_score_mean": (
-                float(np.mean(wrong_candidate_scores)) if wrong_candidate_scores else 0.0
-            ),
+            "best_of_n/vs_greedy_gap": vs_greedy_gap,
+            "best_of_n/vs_majority_gap": vs_majority_gap,
+            "best_of_n/misranking_frac": misranking_frac,
+            "best_of_n/candidate_correct_score_mean": correct_score_mean,
+            "best_of_n/candidate_wrong_score_mean": wrong_score_mean,
+            "eval_best_of_n_prm_best_of_16_accuracy": prm_best_acc,
+            "eval_best_of_n_vs_greedy_gap": vs_greedy_gap,
+            "eval_best_of_n_vs_majority_gap": vs_majority_gap,
         }
 
     def evaluate(self, eval_dataset=None, ignore_keys=None, metric_key_prefix: str = "eval"):
@@ -874,6 +876,17 @@ def main() -> None:
 
     data_metrics = log_dataset_stats(train_ds, eval_ds, args)
     fixed_best_of_n_eval = load_fixed_best_of_n_eval(args)
+    metric_for_best_model = (
+        "eval_best_of_n_prm_best_of_16_accuracy"
+        if fixed_best_of_n_eval is not None
+        else "eval_balanced_accuracy"
+    )
+    if fixed_best_of_n_eval is None:
+        logger.warning(
+            "Falling back to eval_balanced_accuracy for checkpoint selection because fixed best-of-N eval data is unavailable."
+        )
+    else:
+        logger.info("Using fixed best-of-N reranking accuracy for checkpoint selection: %s", metric_for_best_model)
     samples_per_optimizer_step = args.per_device_train_batch_size * args.gradient_accumulation_steps
     uncapped_steps = int(math.ceil((len(train_ds) * args.num_train_epochs) / samples_per_optimizer_step))
     logger.info(
@@ -909,7 +922,7 @@ def main() -> None:
         remove_unused_columns=False,
         report_to=args.report_to,
         run_name=run_name,
-        metric_for_best_model="eval_balanced_accuracy",
+        metric_for_best_model=metric_for_best_model,
         greater_is_better=True,
         seed=args.seed,
     )

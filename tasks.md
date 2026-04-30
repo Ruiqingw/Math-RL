@@ -166,7 +166,7 @@ The intended mainline is:
   - Add a CLI/config flag for sampler rebalance only as an ablation.
   - Log natural negative fraction and effective weighted negative share.
 
-- [ ] Use reranking metric for checkpoint selection.
+- [x] Use reranking metric for checkpoint selection.
   - Evaluate on the fixed best-of-16 candidate JSONL already used by
     `eval_prm_best_of_n.py`.
   - Track `prm_best_of_16_accuracy`, `vs_greedy_gap`, and `vs_majority_gap`.

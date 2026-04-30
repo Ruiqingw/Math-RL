@@ -217,6 +217,11 @@ contract under these key families:
   references, PRM best-of-16 accuracy, gaps vs greedy/majority, misranking
   fraction, and correct/wrong candidate score means.
 
+When the fixed best-of-16 JSONL is present, checkpoint selection uses
+`eval_best_of_n_prm_best_of_16_accuracy` instead of step-level balanced
+accuracy. If the JSONL is unavailable, the script logs a warning and falls back
+to `eval_balanced_accuracy`.
+
 The mainline should leave `--rebalance-mode none`. `--rebalance-mode sampler`
 enables a row-level `WeightedRandomSampler` only for explicit imbalance
 ablations; keep `--neg-loss-weight` and `--focal-gamma` as the first-line
