@@ -103,3 +103,19 @@ Runtime and setup issues are recorded here in chronological order.
   `math-rl` environment, TRL reward imports start without `verl`, and backend
   auto-detection smoke tests pass for classifier, extra0 token-classification,
   and token PRM checkpoints.
+
+## 2026-05-01 - FastAPI `TestClient` smoke test needed optional `httpx`
+
+- command or script: mocked PRM server smoke test using
+  `from fastapi.testclient import TestClient`.
+- environment details: `math-rl` Python 3.10 with FastAPI/Starlette installed.
+- error message or symptom: `RuntimeError: The starlette.testclient module
+  requires the httpx package to be installed`.
+- root cause: `httpx` is an optional test-client dependency and is not required
+  for running the uvicorn PRM server.
+- attempted fixes: avoided adding a new package for this task and switched the
+  smoke test to direct calls of the FastAPI endpoint functions with mocked
+  model state.
+- final fix: direct endpoint smoke test passed for `/health` and `/score`
+  request/response logic.
+- verification status: verified by `server_endpoint_smoke=ok`.

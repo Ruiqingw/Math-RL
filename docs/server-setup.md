@@ -243,12 +243,14 @@ parsed steps than the best-scored correct candidate in the same group.
 ## TRL Verifier Backend
 
 `scripts/trl/rewards.py` supports explicit verifier backend selection:
-`classifier`, `token_prm`, and `extra0_token_cls`; `auto` detects the backend
-from checkpoint files. For extra0 PRM GRPO runs, set
+`classifier`, `token_prm`, `extra0_token_cls`, and `extra0_server`; `auto`
+detects local checkpoint backends from checkpoint files. For single-process
+extra0 PRM GRPO smoke runs, set
 `VERIFIER_BACKEND=extra0_token_cls` or pass
 `--verifier-backend extra0_token_cls`. Reward logs include a numeric
 `verifier_shaping_reward/backend_id` and
-`verifier_shaping_reward/backend_is_extra0_token_cls`.
+backend flags such as `verifier_shaping_reward/backend_is_extra0_token_cls`
+and `verifier_shaping_reward/backend_is_extra0_server`.
 
 The main online reward path is wrong-only shaping. Use
 `math_boxed_reward` plus `VerifierShapingReward`, which gives:
@@ -260,6 +262,28 @@ reward = base_correct + beta * (1 - base_correct) * prm_score
 Correct final answers receive no PRM penalty. Keep
 `--verifier-tiebreak-only` / `VERIFIER_TIEBREAK_ONLY=1` only as an explicit
 all-wrong-group ablation.
+
+For the final 3+1 GPU shape, run the PRM once as a local server on the
+dedicated GPU and point TRL at it:
+
+```bash
+CUDA_VISIBLE_DEVICES=3 PYTHONNOUSERSITE=1 $PY \
+  scripts/verifier/serve_qwen_extra0_prm.py \
+  --model-path token_prm_runs/extra0-prm/final \
+  --host 127.0.0.1 \
+  --port 8008 \
+  --device cuda
+
+CUDA_VISIBLE_DEVICES=0,1,2 VERIFIER_BACKEND=extra0_server \
+  VERIFIER_SERVER_URL=http://127.0.0.1:8008 \
+  accelerate launch --num_processes 3 scripts/trl/train_grpo_math_verifier.py \
+  --verifier-backend extra0_server \
+  --verifier-server-url http://127.0.0.1:8008
+```
+
+The server exposes `GET /health` and batched `POST /score` endpoints. TRL sends
+all parsed completions in a reward-function call as one scoring batch when
+`VERIFIER_BACKEND=extra0_server`.
 
 ## Model Directory
 

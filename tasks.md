@@ -203,7 +203,7 @@ The intended mainline is:
   - Wrong final answers must not be able to exceed correct final answers.
   - Keep all-wrong-only tie-break as an optional ablation, not the default.
 
-- [ ] Add PRM server reward backend for final 3+1 GPU training.
+- [x] Add PRM server reward backend for final 3+1 GPU training.
   - Implement a server such as `scripts/verifier/serve_qwen_extra0_prm.py`.
   - Load the extra0 PRM once on the dedicated PRM GPU.
   - Expose a local scoring API that accepts problem text and parsed steps.

@@ -59,7 +59,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lora-dropout", type=float, default=0.0)
     parser.add_argument("--log-completions-samples", type=int, default=8)
     parser.add_argument("--verifier-model-path", default=DEFAULT_VERIFIER_MODEL_PATH)
-    parser.add_argument("--verifier-backend", default="auto", choices=["auto", "classifier", "token_prm", "extra0_token_cls"])
+    parser.add_argument(
+        "--verifier-backend",
+        default="auto",
+        choices=["auto", "classifier", "token_prm", "extra0_token_cls", "extra0_server"],
+    )
     parser.add_argument("--verifier-device", default="cuda")
     parser.add_argument("--verifier-max-length", type=int, default=1024)
     parser.add_argument("--verifier-batch-size", type=int, default=4)
@@ -68,6 +72,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--verifier-threshold", type=float, default=0.4)
     parser.add_argument("--verifier-tiebreak-only", action="store_true", default=False)
     parser.add_argument("--no-verifier-tiebreak-only", dest="verifier_tiebreak_only", action="store_false")
+    parser.add_argument("--verifier-server-url", default="http://127.0.0.1:8008")
+    parser.add_argument("--verifier-server-timeout", type=float, default=60.0)
     return parser.parse_args()
 
 
@@ -143,6 +149,8 @@ def main() -> None:
         verifier_delta=args.verifier_delta,
         verifier_threshold=args.verifier_threshold,
         verifier_tiebreak_only=args.verifier_tiebreak_only,
+        verifier_server_url=args.verifier_server_url,
+        verifier_server_timeout=args.verifier_server_timeout,
     )
 
     # Two separate reward functions so TRL logs each independently:

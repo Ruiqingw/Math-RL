@@ -7,6 +7,8 @@ import json
 import logging
 from typing import Any
 
+import requests
+
 try:
     from verl.utils.reward_score.math_reward import compute_score, last_boxed_only_string, remove_boxed
 except ModuleNotFoundError:
@@ -79,6 +81,7 @@ VERIFIER_BACKEND_IDS = {
     "classifier": 1.0,
     "token_prm": 2.0,
     "extra0_token_cls": 3.0,
+    "extra0_server": 4.0,
 }
 
 
@@ -174,7 +177,11 @@ def _load_verifier(verifier_model_path: str, verifier_device: str, verifier_back
     cls_head_path = os.path.join(verifier_model_path, "cls_head.pt")
     logger.info("Loading verifier backend=%s requested=%s path=%s device=%s", backend, requested_backend, verifier_model_path, verifier_device)
 
-    if backend == "classifier":
+    if backend == "extra0_server":
+        model = None
+        tokenizer = None
+        label_tokens = None
+    elif backend == "classifier":
         tokenizer = AutoTokenizer.from_pretrained(verifier_model_path, trust_remote_code=True)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
@@ -206,6 +213,39 @@ def _load_verifier(verifier_model_path: str, verifier_device: str, verifier_back
     return backend, model, tokenizer, label_tokens
 
 
+def _score_steps_extra0_server_batch(
+    server_url: str,
+    items: list[dict[str, Any]],
+    *,
+    max_length: int,
+    timeout: float,
+) -> tuple[list[list[float]], dict[str, float]]:
+    if not items:
+        return [], {}
+
+    url = server_url.rstrip("/") + "/score"
+    response = requests.post(
+        url,
+        json={
+            "items": [{"problem": item["problem"], "steps": item["steps"]} for item in items],
+            "max_length": max_length,
+        },
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    scores = payload.get("scores", [])
+    if len(scores) != len(items):
+        raise RuntimeError(f"PRM server returned {len(scores)} scores for {len(items)} items")
+
+    metrics = {
+        "reward_server/request_count": float(payload.get("request_count", 0.0)),
+        "reward_server/batch_size": float(payload.get("batch_size", len(items))),
+        "reward_server/latency_ms": float(payload.get("latency_ms", 0.0)),
+    }
+    return [[float(score) for score in result.get("step_scores", [])] for result in scores], metrics
+
+
 def verifier_shaping_reward(
     prompts,
     completions,
@@ -219,6 +259,8 @@ def verifier_shaping_reward(
     verifier_delta=0.05,
     verifier_threshold=0.5,
     verifier_tiebreak_only=False,
+    verifier_server_url="http://127.0.0.1:8008",
+    verifier_server_timeout=60.0,
     gold_answer=None,
     **kwargs,
 ):
@@ -233,28 +275,53 @@ def verifier_shaping_reward(
     rewards = []
     base_correct_flags = []
     min_step_scores = []
+    server_metrics: dict[str, float] = {}
     if gold_answer is None:
         gold_answer = [None] * len(completions)
 
+    prepared_items: list[dict[str, Any]] = []
     for prompt, completion, problem_text, answer in zip(prompts, completions, problem, gold_answer):
         completion_text = normalize_completion(completion)
-        steps = split_into_steps(completion_text)
-        if not steps or not problem_text:
-            rewards.append(0.0)
-            base_correct_flags.append(False)
-            continue
-
         base_correct = False
         if answer is not None:
             try:
                 base_correct = bool(compute_score(completion_text, ground_truth=answer))
             except Exception:
                 base_correct = False
+        steps = split_into_steps(completion_text)
+        prepared_items.append(
+            {
+                "problem": problem_text,
+                "steps": steps,
+                "base_correct": base_correct,
+                "valid": bool(steps and problem_text),
+            }
+        )
+
+    if backend == "extra0_server":
+        valid_items = [item for item in prepared_items if item["valid"]]
+        server_step_scores, server_metrics = _score_steps_extra0_server_batch(
+            verifier_server_url,
+            valid_items,
+            max_length=verifier_max_length,
+            timeout=float(verifier_server_timeout),
+        )
+        score_iter = iter(server_step_scores)
+        for item in prepared_items:
+            if item["valid"]:
+                item["step_scores"] = next(score_iter)
+
+    for item in prepared_items:
+        base_correct = item["base_correct"]
+        base_correct_flags.append(base_correct)
+        if not item["valid"]:
+            rewards.append(0.0)
+            continue
 
         if backend == "classifier":
             step_scores = score_steps_classifier(
-                problem=problem_text,
-                steps=steps,
+                problem=item["problem"],
+                steps=item["steps"],
                 model=model,
                 tokenizer=tokenizer,
                 device=verifier_device,
@@ -263,18 +330,20 @@ def verifier_shaping_reward(
             )
         elif backend == "extra0_token_cls":
             step_scores = score_steps_extra0(
-                problem=problem_text,
-                steps=steps,
+                problem=item["problem"],
+                steps=item["steps"],
                 model=model,
                 tokenizer=tokenizer,
                 device=verifier_device,
                 max_length=verifier_max_length,
                 require_all_steps=False,
             )
+        elif backend == "extra0_server":
+            step_scores = item.get("step_scores", [])
         else:
             step_scores = score_steps_token_prm(
-                problem=problem_text,
-                steps=steps,
+                problem=item["problem"],
+                steps=item["steps"],
                 model=model,
                 tokenizer=tokenizer,
                 label_tokens=label_tokens,
@@ -285,7 +354,6 @@ def verifier_shaping_reward(
 
         if not step_scores:
             rewards.append(0.0)
-            base_correct_flags.append(base_correct)
             continue
 
         # Use a weakest-link signal. Offline best-of-N diagnostics showed that
@@ -304,7 +372,6 @@ def verifier_shaping_reward(
         else:
             shaping = verifier_beta * min_step_score
         rewards.append(float(shaping))
-        base_correct_flags.append(base_correct)
 
     if rewards:
         gated_rewards = rewards[:]
@@ -339,6 +406,12 @@ def verifier_shaping_reward(
                 "verifier_shaping_reward/backend_is_extra0_token_cls",
                 1.0 if backend == "extra0_token_cls" else 0.0,
             )
+            log_metric(
+                "verifier_shaping_reward/backend_is_extra0_server",
+                1.0 if backend == "extra0_server" else 0.0,
+            )
+            for metric_name, metric_value in server_metrics.items():
+                log_metric(metric_name, metric_value)
             log_metric("math_boxed_reward/all_wrong_group_count", float(all_wrong_groups))
             log_metric("math_boxed_reward/all_wrong_group_frac", float(all_wrong_groups / total_groups))
             if min_step_scores:
@@ -378,6 +451,8 @@ class VerifierShapingReward:
         verifier_delta: float = 0.05,
         verifier_threshold: float = 0.5,
         verifier_tiebreak_only: bool = False,
+        verifier_server_url: str = "http://127.0.0.1:8008",
+        verifier_server_timeout: float = 60.0,
     ):
         self.verifier_model_path = verifier_model_path
         self.verifier_backend = verifier_backend
@@ -388,6 +463,8 @@ class VerifierShapingReward:
         self.verifier_delta = verifier_delta
         self.verifier_threshold = verifier_threshold
         self.verifier_tiebreak_only = verifier_tiebreak_only
+        self.verifier_server_url = verifier_server_url
+        self.verifier_server_timeout = verifier_server_timeout
         self.__name__ = "verifier_shaping_reward"
 
     def __call__(self, prompts, completions, problem, **kwargs):
@@ -404,6 +481,8 @@ class VerifierShapingReward:
             verifier_delta=self.verifier_delta,
             verifier_threshold=self.verifier_threshold,
             verifier_tiebreak_only=self.verifier_tiebreak_only,
+            verifier_server_url=self.verifier_server_url,
+            verifier_server_timeout=self.verifier_server_timeout,
             **kwargs,
         )
 
@@ -421,6 +500,8 @@ class MathVerifierReward:
         verifier_beta: float = 0.1,
         verifier_delta: float = 0.05,
         verifier_threshold: float = 0.5,
+        verifier_server_url: str = "http://127.0.0.1:8008",
+        verifier_server_timeout: float = 60.0,
     ):
         self.verifier_model_path = verifier_model_path
         self.verifier_backend = verifier_backend
@@ -430,6 +511,8 @@ class MathVerifierReward:
         self.verifier_beta = verifier_beta
         self.verifier_delta = verifier_delta
         self.verifier_threshold = verifier_threshold
+        self.verifier_server_url = verifier_server_url
+        self.verifier_server_timeout = verifier_server_timeout
         self.__name__ = "math_verifier_reward"
 
     def __call__(self, prompts, completions, gold_answer, problem, **kwargs):
@@ -451,6 +534,8 @@ class MathVerifierReward:
             verifier_beta=self.verifier_beta,
             verifier_delta=self.verifier_delta,
             verifier_threshold=self.verifier_threshold,
+            verifier_server_url=self.verifier_server_url,
+            verifier_server_timeout=self.verifier_server_timeout,
             **kwargs,
         )
         return [float(base + shaping) for base, shaping in zip(base_rewards, shaping_rewards)]
