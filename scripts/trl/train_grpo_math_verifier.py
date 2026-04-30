@@ -66,7 +66,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--verifier-beta", type=float, default=0.3)
     parser.add_argument("--verifier-delta", type=float, default=0.05)
     parser.add_argument("--verifier-threshold", type=float, default=0.4)
-    parser.add_argument("--verifier-tiebreak-only", action="store_true", default=True)
+    parser.add_argument("--verifier-tiebreak-only", action="store_true", default=False)
     parser.add_argument("--no-verifier-tiebreak-only", dest="verifier_tiebreak_only", action="store_false")
     return parser.parse_args()
 

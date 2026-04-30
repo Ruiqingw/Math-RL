@@ -196,7 +196,7 @@ The intended mainline is:
   - Keep old backends for ablations.
   - Make backend selection explicit in logs/metrics.
 
-- [ ] Use wrong-only shaping as the main reward mode.
+- [x] Use wrong-only shaping as the main reward mode.
   - Main formula:
     `reward = base_correct + beta * (1 - base_correct) * prm_score`
   - Correct final answers must not be penalized by PRM noise.

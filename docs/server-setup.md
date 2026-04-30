@@ -250,6 +250,17 @@ from checkpoint files. For extra0 PRM GRPO runs, set
 `verifier_shaping_reward/backend_id` and
 `verifier_shaping_reward/backend_is_extra0_token_cls`.
 
+The main online reward path is wrong-only shaping. Use
+`math_boxed_reward` plus `VerifierShapingReward`, which gives:
+
+```text
+reward = base_correct + beta * (1 - base_correct) * prm_score
+```
+
+Correct final answers receive no PRM penalty. Keep
+`--verifier-tiebreak-only` / `VERIFIER_TIEBREAK_ONLY=1` only as an explicit
+all-wrong-group ablation.
+
 ## Model Directory
 
 Base models should be downloaded into the repository-local `models/` directory.

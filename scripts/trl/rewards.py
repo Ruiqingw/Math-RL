@@ -222,6 +222,8 @@ def verifier_shaping_reward(
     gold_answer=None,
     **kwargs,
 ):
+    if not 0.0 <= float(verifier_beta) <= 1.0:
+        raise ValueError(f"verifier_beta must be in [0, 1] so wrong answers cannot exceed correct answers, got {verifier_beta}")
     backend, model, tokenizer, label_tokens = _load_verifier(
         verifier_model_path,
         verifier_device,
@@ -281,6 +283,11 @@ def verifier_shaping_reward(
                 batch_size=verifier_batch_size,
             )
 
+        if not step_scores:
+            rewards.append(0.0)
+            base_correct_flags.append(base_correct)
+            continue
+
         # Use a weakest-link signal. Offline best-of-N diagnostics showed that
         # min aggregation preserves PRM usefulness better than averaging, which
         # can dilute a single bad step across many fluent-looking steps.
@@ -290,6 +297,8 @@ def verifier_shaping_reward(
         # Min-form shaping:
         # - Correct final answers keep the clean 0/1 boxed reward only.
         # - Incorrect final answers receive min_step_score directly as shaping.
+        # Used alongside math_boxed_reward, this yields:
+        # reward = base_correct + beta * (1 - base_correct) * prm_score.
         if base_correct:
             shaping = 0.0
         else:
