@@ -264,13 +264,13 @@ The intended mainline is:
 
 ## Phase 4: Mark Legacy verl Reward Path
 
-- [ ] Mark `scripts/verl/verl_verifier_reward.py` as legacy.
+- [x] Mark `scripts/verl/verl_verifier_reward.py` as legacy.
   - Do not port extra0 backend support into verl for now.
   - Add a short file-level note or runbook note that the active path is TRL.
   - Do not spend time debugging verl environment issues unless the user
     explicitly reactivates this path.
 
-- [ ] Avoid using legacy verl reward formulas in new experiments.
+- [x] Avoid using legacy verl reward formulas in new experiments.
   - Treat `beta * avg - delta * first_error` as a legacy ablation only.
   - Do not use it for the new extra0 PRM GRPO result.
 

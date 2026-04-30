@@ -275,6 +275,11 @@ VERIFIER_REWARD_MODE=wrong_only VERIFIER_BETA=0.2  bash scripts/trl/run_trl_grpo
 Use `VERIFIER_REWARD_MODE=all_wrong_tiebreak` only for the all-wrong-group
 ablation.
 
+Do not use `scripts/verl/verl_verifier_reward.py` for new extra0 PRM GRPO
+experiments. That file is a legacy ablation path and its
+`beta * avg_step - delta * first_error` formula is not the main reward for new
+claims.
+
 For the final 3+1 GPU shape, run the PRM once as a local server on the
 dedicated GPU and point TRL at it:
 

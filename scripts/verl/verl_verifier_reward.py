@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-Custom verl reward function: built-in MATH outcome reward + verifier shaping.
+LEGACY ablation: verl reward function with built-in MATH outcome reward plus
+old verifier shaping.
+
+The active extra0 PRM GRPO path is `scripts/trl/rewards.py` with
+`extra0_token_cls` / `extra0_server` and wrong-only shaping. Do not port extra0
+backend support into this verl file unless the verl path is explicitly
+reactivated.
 
 Designed for a clean A/B comparison:
   - baseline GRPO uses verl's ordinary MATH rule reward
@@ -8,6 +14,9 @@ Designed for a clean A/B comparison:
 
 This avoids changing the main reward target while testing whether the verifier
 provides useful auxiliary signal.
+
+The formula `beta * avg_step - delta * first_error` below is retained only for
+historical ablations, not for new extra0 PRM claims.
 """
 
 import os
