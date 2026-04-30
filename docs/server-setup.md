@@ -209,12 +209,18 @@ contract under these key families:
   dropped supervision.
 - `extra0/neg_loss_weight`, `extra0/focal_gamma`,
   `extra0/effective_neg_weight_share`, `extra0/rebalance_mode`,
-  `extra0/base_model`, `extra0/tuning_mode`, `extra0/lora_r`,
-  `extra0/lora_alpha`, `extra0/best_checkpoint`,
-  `extra0/best_metric_name`, and `extra0/save_total_limit` for run metadata.
+  `extra0/sampler_target_neg_frac`, `extra0/base_model`,
+  `extra0/tuning_mode`, `extra0/lora_r`, `extra0/lora_alpha`,
+  `extra0/best_checkpoint`, `extra0/best_metric_name`, and
+  `extra0/save_total_limit` for run metadata.
 - `best_of_n/reference_*` and `best_of_n/*` for fixed-candidate reranking
   references, PRM best-of-16 accuracy, gaps vs greedy/majority, misranking
   fraction, and correct/wrong candidate score means.
+
+The mainline should leave `--rebalance-mode none`. `--rebalance-mode sampler`
+enables a row-level `WeightedRandomSampler` only for explicit imbalance
+ablations; keep `--neg-loss-weight` and `--focal-gamma` as the first-line
+controls.
 
 ## Model Directory
 

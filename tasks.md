@@ -160,7 +160,7 @@ The intended mainline is:
     - `extra0/best_metric_name`
     - `extra0/save_total_limit`
 
-- [ ] Keep negative imbalance controls conservative.
+- [x] Keep negative imbalance controls conservative.
   - Default: no `WeightedRandomSampler`.
   - Keep `NEG_LOSS_WEIGHT` and optional focal loss.
   - Add a CLI/config flag for sampler rebalance only as an ablation.

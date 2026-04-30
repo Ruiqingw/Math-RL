@@ -27,7 +27,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from peft import LoraConfig, TaskType, get_peft_model
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
 from transformers import (
     AutoModelForTokenClassification,
     AutoTokenizer,
@@ -142,6 +142,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--neg-loss-weight", type=float, default=5.0)
     parser.add_argument("--focal-gamma", type=float, default=2.0)
     parser.add_argument("--rebalance-mode", choices=["none", "sampler"], default="none")
+    parser.add_argument("--sampler-target-neg-frac", type=float, default=0.20)
 
     parser.add_argument("--wandb-project", default=DEFAULT_WANDB_PROJECT)
     parser.add_argument("--report-to", default="wandb")
@@ -352,6 +353,7 @@ class Extra0PRMDataset(Dataset):
         max_rows: Optional[int] = None,
     ) -> None:
         self.examples: List[Dict[str, torch.Tensor]] = []
+        self.sample_labels: List[int] = []
         self.extra0_token_id = resolve_extra0_token_id(tokenizer, EXTRA0_TOKEN)
 
         pos_count = 0
@@ -386,8 +388,11 @@ class Extra0PRMDataset(Dataset):
             row_count += 1
 
             supervised = [label for label in encoding.labels if label != IGNORE_INDEX]
-            pos_count += sum(1 for label in supervised if label == POSITIVE_LABEL)
-            neg_count += sum(1 for label in supervised if label == NEGATIVE_LABEL)
+            row_pos_count = sum(1 for label in supervised if label == POSITIVE_LABEL)
+            row_neg_count = sum(1 for label in supervised if label == NEGATIVE_LABEL)
+            self.sample_labels.append(1 if row_neg_count > 0 else 0)
+            pos_count += row_pos_count
+            neg_count += row_neg_count
             expected_extra0_count += encoding.expected_extra0_count
             kept_extra0_count += encoding.kept_extra0_count
             dropped_label_count += encoding.dropped_label_count
@@ -416,6 +421,67 @@ class Extra0PRMDataset(Dataset):
 
 class Extra0PRMTrainer(Trainer):
     """Trainer that computes loss only at ``<extra_0>`` positions."""
+
+    def get_train_dataloader(self) -> DataLoader:
+        if getattr(self, "_rebalance_mode", "none") != "sampler":
+            return super().get_train_dataloader()
+
+        train_dataset = self.train_dataset
+        if train_dataset is None:
+            raise ValueError("Trainer: training requires a train_dataset.")
+
+        sample_labels = getattr(train_dataset, "sample_labels", None)
+        if not sample_labels:
+            logger.warning("Sampler rebalance requested but train_dataset has no sample_labels; using default dataloader.")
+            return super().get_train_dataloader()
+
+        n_pos_only = sum(1 for label in sample_labels if label == 0)
+        n_has_neg = sum(1 for label in sample_labels if label == 1)
+        if n_pos_only == 0 or n_has_neg == 0:
+            logger.warning(
+                "Sampler rebalance fallback: only one row class present (pos_only=%s has_neg=%s). "
+                "Using default dataloader.",
+                n_pos_only,
+                n_has_neg,
+            )
+            return super().get_train_dataloader()
+
+        target_neg_frac = float(getattr(self, "_sampler_target_neg_frac", 0.20))
+        if not 0.0 < target_neg_frac < 1.0:
+            raise ValueError(f"--sampler-target-neg-frac must be between 0 and 1, got {target_neg_frac}")
+
+        natural_neg_row_frac = n_has_neg / (n_pos_only + n_has_neg)
+        weight_pos_only = 1.0
+        weight_has_neg = target_neg_frac * n_pos_only / ((1.0 - target_neg_frac) * n_has_neg)
+        sample_weights = [weight_has_neg if label == 1 else weight_pos_only for label in sample_labels]
+        sampler = WeightedRandomSampler(
+            weights=sample_weights,
+            num_samples=len(train_dataset),
+            replacement=True,
+        )
+        logger.info(
+            "Extra0 sampler rebalance ablation: pos_only_rows=%s has_neg_rows=%s natural_has_neg_frac=%.4f "
+            "target_has_neg_frac=%.4f weights(pos_only=%.4f, has_neg=%.4f)",
+            f"{n_pos_only:,}",
+            f"{n_has_neg:,}",
+            natural_neg_row_frac,
+            target_neg_frac,
+            weight_pos_only,
+            weight_has_neg,
+        )
+
+        batch_size = getattr(self, "_train_batch_size", self.args.per_device_train_batch_size)
+        dataloader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            sampler=sampler,
+            collate_fn=self.data_collator,
+            num_workers=self.args.dataloader_num_workers,
+            pin_memory=self.args.dataloader_pin_memory,
+            drop_last=self.args.dataloader_drop_last,
+            persistent_workers=self.args.dataloader_persistent_workers,
+        )
+        return self.accelerator.prepare(dataloader)
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs["labels"]
@@ -671,7 +737,8 @@ def log_dataset_stats(train_ds: Extra0PRMDataset, eval_ds: Extra0PRMDataset, arg
     )
     metrics["extra0/neg_loss_weight"] = float(args.neg_loss_weight)
     metrics["extra0/focal_gamma"] = float(args.focal_gamma)
-    metrics["extra0/rebalance_mode"] = 0.0
+    metrics["extra0/rebalance_mode"] = 1.0 if args.rebalance_mode == "sampler" else 0.0
+    metrics["extra0/sampler_target_neg_frac"] = float(args.sampler_target_neg_frac)
     metrics["extra0/effective_neg_weight_share"] = effective_neg_weight_share(
         train_ds.stats.pos_count,
         train_ds.stats.neg_count,
@@ -721,6 +788,7 @@ def update_wandb_contract_summary(
         "extra0/lora_r": args.lora_r if args.use_lora else 0,
         "extra0/lora_alpha": args.lora_alpha if args.use_lora else 0,
         "extra0/rebalance_mode": args.rebalance_mode,
+        "extra0/sampler_target_neg_frac": args.sampler_target_neg_frac,
         "extra0/save_total_limit": args.save_total_limit,
         "extra0/extra0_token_id": extra0_token_id,
         "extra0/best_metric_name": training_args.metric_for_best_model,
@@ -760,8 +828,8 @@ def prepare_model(args: argparse.Namespace):
 def main() -> None:
     args = parse_args()
     os.environ.setdefault("WANDB_PROJECT", args.wandb_project)
-    if args.rebalance_mode != "none":
-        raise NotImplementedError("Sampler rebalance is reserved for ablations and is not implemented in the mainline yet.")
+    if args.rebalance_mode == "sampler":
+        logger.info("Sampler rebalance enabled as an explicit ablation; default mainline remains rebalance_mode=none.")
 
     run_name = run_name_from_args(args)
     output_dir = os.path.join(args.output_root, run_name)
@@ -863,6 +931,8 @@ def main() -> None:
     )
     trainer._neg_loss_weight = args.neg_loss_weight
     trainer._focal_gamma = args.focal_gamma
+    trainer._rebalance_mode = args.rebalance_mode
+    trainer._sampler_target_neg_frac = args.sampler_target_neg_frac
     trainer._best_of_n_eval = fixed_best_of_n_eval
     trainer._best_of_n_prm_aggregation = args.best_of_n_prm_aggregation
     trainer._best_of_n_verifier_max_length = args.best_of_n_verifier_max_length
