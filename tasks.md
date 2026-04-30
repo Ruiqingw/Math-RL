@@ -105,7 +105,7 @@ The intended mainline is:
   - Log label counts, number of `<extra_0>` positions, truncation rate, and
     dropped-supervision rate.
 
-- [ ] Add server model download/setup notes.
+- [x] Add server model download/setup notes.
   - Create or update a runbook section with the ModelScope download command for
     Qwen2.5-Math-1.5B-Instruct.
   - Create or update a runbook section with the ModelScope download command for

@@ -203,3 +203,103 @@ Base models should be downloaded into the repository-local `models/` directory.
 Keep all model paths configurable in scripts; do not hard-code user-specific
 absolute paths except in local launch commands.
 
+Use these defaults for the current extra0 PRM work:
+
+```bash
+POLICY_MODEL_PATH="${POLICY_MODEL_PATH:-models/Qwen2.5-Math-1.5B-Instruct}"
+PRM_BASE_MODEL_PATH="${PRM_BASE_MODEL_PATH:-models/Qwen2.5-Math-7B-Instruct}"
+```
+
+Scripts should accept these paths through CLI flags or environment variables so
+the same code can run with different server-local cache locations.
+
+## ModelScope Downloads
+
+Run model downloads from the repository root in the same proxy shell used for
+package installs:
+
+```bash
+cd /Work21/2024/luyuheng/Log-TIR/mihomo-server-proxy
+./start_mihomo.sh
+source ./proxy_env.sh
+
+cd /Work21/2024/luyuheng/Math-RL
+mkdir -p models
+PY=/Work21/2024/luyuheng/miniconda3/envs/math-rl/bin/python
+```
+
+Download the GRPO policy model:
+
+```bash
+PYTHONNOUSERSITE=1 $PY - <<'PY'
+from modelscope import snapshot_download
+
+snapshot_download(
+    "Qwen/Qwen2.5-Math-1.5B-Instruct",
+    local_dir="models/Qwen2.5-Math-1.5B-Instruct",
+)
+PY
+```
+
+Download the PRM base model:
+
+```bash
+PYTHONNOUSERSITE=1 $PY - <<'PY'
+from modelscope import snapshot_download
+
+snapshot_download(
+    "Qwen/Qwen2.5-Math-7B-Instruct",
+    local_dir="models/Qwen2.5-Math-7B-Instruct",
+)
+PY
+```
+
+The expected local paths are:
+
+```text
+models/Qwen2.5-Math-1.5B-Instruct
+models/Qwen2.5-Math-7B-Instruct
+```
+
+If a directory contains a `._____temp/` subdirectory or a partially downloaded
+`model.safetensors`, treat the model as incomplete and rerun the same
+`snapshot_download(...)` command from the proxy shell. Do not start training
+until both model directories contain the tokenizer files, config files, and the
+complete safetensors shards.
+
+Minimal local load checks:
+
+```bash
+PYTHONNOUSERSITE=1 $PY - <<'PY'
+from transformers import AutoConfig, AutoTokenizer
+
+for path in [
+    "models/Qwen2.5-Math-1.5B-Instruct",
+    "models/Qwen2.5-Math-7B-Instruct",
+]:
+    tok = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
+    cfg = AutoConfig.from_pretrained(path, trust_remote_code=True)
+    print(path, "vocab_size=", len(tok), "model_type=", cfg.model_type)
+PY
+```
+
+For the extra0 PRM path, verify the tokenizer exposes the Qwen step marker:
+
+```bash
+PYTHONNOUSERSITE=1 $PY - <<'PY'
+from transformers import AutoTokenizer
+
+tok = AutoTokenizer.from_pretrained(
+    "models/Qwen2.5-Math-7B-Instruct",
+    trust_remote_code=True,
+)
+extra0_id = tok.convert_tokens_to_ids("<extra_0>")
+print("extra0_id=", extra0_id)
+assert extra0_id != tok.unk_token_id
+PY
+```
+
+Current server note from 2026-05-01: `models/Qwen2.5-Math-1.5B-Instruct`
+exists but still has a `._____temp/` download directory, so rerun the policy
+model download before using it. `models/Qwen2.5-Math-7B-Instruct` still needs to
+be downloaded.
