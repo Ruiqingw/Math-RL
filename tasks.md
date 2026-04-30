@@ -93,7 +93,7 @@ The intended mainline is:
   - Provide `score_steps(...)` that returns positive probabilities at all
     `<extra_0>` positions from a single forward pass.
 
-- [ ] Add an extra0 PRM training script.
+- [x] Add an extra0 PRM training script.
   - Create `scripts/verifier/train_qwen_extra0_prm.py`.
   - Use `AutoModelForTokenClassification` with `num_labels=2`.
   - Default base model should be a local `models/Qwen2.5-Math-7B-Instruct`
