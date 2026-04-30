@@ -285,6 +285,11 @@ The server exposes `GET /health` and batched `POST /score` endpoints. TRL sends
 all parsed completions in a reward-function call as one scoring batch when
 `VERIFIER_BACKEND=extra0_server`.
 
+Reward diagnostics include all-wrong, mixed, and all-correct group fractions;
+wrong sample fraction; PRM score mean/std split by final-answer correctness; and
+the fraction of groups where PRM shaping changes the ranking among multiple
+wrong samples.
+
 ## Model Directory
 
 Base models should be downloaded into the repository-local `models/` directory.

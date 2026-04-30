@@ -215,7 +215,7 @@ The intended mainline is:
     - `CUDA_VISIBLE_DEVICES=0,1,2 accelerate launch --num_processes 3` for
       TRL GRPO.
 
-- [ ] Add reward diagnostics.
+- [x] Add reward diagnostics.
   - Log `all_wrong_group_frac`, `mixed_group_frac`, `all_correct_group_frac`.
   - Log `wrong_sample_frac`.
   - Log PRM score mean/std for correct samples and wrong samples separately.

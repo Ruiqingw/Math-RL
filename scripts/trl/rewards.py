@@ -122,6 +122,17 @@ def _group_key(prompt: Any, problem_text: Any, answer: Any) -> tuple[str, str, s
     return (str(prompt), str(problem_text), str(answer))
 
 
+def _mean(values: list[float]) -> float:
+    return float(sum(values) / len(values)) if values else 0.0
+
+
+def _std(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    mean = _mean(values)
+    return float((sum((value - mean) ** 2 for value in values) / len(values)) ** 0.5)
+
+
 def math_boxed_reward(prompts, completions, gold_answer, **kwargs):
     rewards = []
     for completion, answer in zip(completions, gold_answer):
@@ -275,6 +286,7 @@ def verifier_shaping_reward(
     rewards = []
     base_correct_flags = []
     min_step_scores = []
+    prm_scores_by_sample: list[float | None] = []
     server_metrics: dict[str, float] = {}
     if gold_answer is None:
         gold_answer = [None] * len(completions)
@@ -316,6 +328,7 @@ def verifier_shaping_reward(
         base_correct_flags.append(base_correct)
         if not item["valid"]:
             rewards.append(0.0)
+            prm_scores_by_sample.append(None)
             continue
 
         if backend == "classifier":
@@ -354,6 +367,7 @@ def verifier_shaping_reward(
 
         if not step_scores:
             rewards.append(0.0)
+            prm_scores_by_sample.append(None)
             continue
 
         # Use a weakest-link signal. Offline best-of-N diagnostics showed that
@@ -361,6 +375,7 @@ def verifier_shaping_reward(
         # can dilute a single bad step across many fluent-looking steps.
         min_step_score = min(step_scores)
         min_step_scores.append(float(min_step_score))
+        prm_scores_by_sample.append(float(min_step_score))
 
         # Min-form shaping:
         # - Correct final answers keep the clean 0/1 boxed reward only.
@@ -377,7 +392,11 @@ def verifier_shaping_reward(
         gated_rewards = rewards[:]
         total_groups = 0
         all_wrong_groups = 0
+        mixed_groups = 0
+        all_correct_groups = 0
         active_tiebreak_groups = 0
+        multi_wrong_groups = 0
+        wrong_ranking_changed_groups = 0
         start = 0
         while start < len(gated_rewards):
             group_id = _group_key(prompts[start], problem[start], gold_answer[start])
@@ -387,9 +406,21 @@ def verifier_shaping_reward(
 
             total_groups += 1
             group_has_tie = end - start > 1
-            group_all_wrong = not any(base_correct_flags[start:end])
+            group_correct_count = sum(1 for is_correct in base_correct_flags[start:end] if is_correct)
+            group_all_wrong = group_correct_count == 0
+            group_all_correct = group_correct_count == end - start
             if group_all_wrong:
                 all_wrong_groups += 1
+            elif group_all_correct:
+                all_correct_groups += 1
+            else:
+                mixed_groups += 1
+            wrong_indices = [idx for idx in range(start, end) if not base_correct_flags[idx]]
+            if len(wrong_indices) >= 2:
+                multi_wrong_groups += 1
+                wrong_rewards = [rewards[idx] for idx in wrong_indices]
+                if max(wrong_rewards) - min(wrong_rewards) > 1e-12:
+                    wrong_ranking_changed_groups += 1
             if verifier_tiebreak_only:
                 # Only let the verifier break ties when every sampled completion
                 # for this prompt is still wrong under the main answer-level reward.
@@ -401,6 +432,18 @@ def verifier_shaping_reward(
             start = end
 
         if log_metric is not None and total_groups > 0:
+            wrong_sample_count = sum(1 for is_correct in base_correct_flags if not is_correct)
+            valid_scores = [score for score in prm_scores_by_sample if score is not None]
+            correct_scores = [
+                score
+                for score, is_correct in zip(prm_scores_by_sample, base_correct_flags)
+                if score is not None and is_correct
+            ]
+            wrong_scores = [
+                score
+                for score, is_correct in zip(prm_scores_by_sample, base_correct_flags)
+                if score is not None and not is_correct
+            ]
             log_metric("verifier_shaping_reward/backend_id", VERIFIER_BACKEND_IDS[backend])
             log_metric(
                 "verifier_shaping_reward/backend_is_extra0_token_cls",
@@ -414,10 +457,27 @@ def verifier_shaping_reward(
                 log_metric(metric_name, metric_value)
             log_metric("math_boxed_reward/all_wrong_group_count", float(all_wrong_groups))
             log_metric("math_boxed_reward/all_wrong_group_frac", float(all_wrong_groups / total_groups))
+            log_metric("math_boxed_reward/mixed_group_frac", float(mixed_groups / total_groups))
+            log_metric("math_boxed_reward/all_correct_group_frac", float(all_correct_groups / total_groups))
+            log_metric("math_boxed_reward/wrong_sample_frac", float(wrong_sample_count / len(base_correct_flags)))
             if min_step_scores:
                 log_metric(
                     "verifier_shaping_reward/min_step_score_mean",
                     float(sum(min_step_scores) / len(min_step_scores)),
+                )
+            if valid_scores:
+                log_metric("verifier_shaping_reward/prm_score_mean", _mean(valid_scores))
+                log_metric("verifier_shaping_reward/prm_score_std", _std(valid_scores))
+            if correct_scores:
+                log_metric("verifier_shaping_reward/prm_score_correct_mean", _mean(correct_scores))
+                log_metric("verifier_shaping_reward/prm_score_correct_std", _std(correct_scores))
+            if wrong_scores:
+                log_metric("verifier_shaping_reward/prm_score_wrong_mean", _mean(wrong_scores))
+                log_metric("verifier_shaping_reward/prm_score_wrong_std", _std(wrong_scores))
+            if multi_wrong_groups:
+                log_metric(
+                    "verifier_shaping_reward/wrong_ranking_changed_group_frac",
+                    float(wrong_ranking_changed_groups / multi_wrong_groups),
                 )
             if verifier_tiebreak_only:
                 log_metric("verifier_shaping_reward/gate_active_group_count", float(active_tiebreak_groups))
